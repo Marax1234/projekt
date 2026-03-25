@@ -22,6 +22,7 @@ Testschritte (2 Terminals):
 
 import json
 import logging
+import queue
 import socket
 import ssl
 import time
@@ -82,6 +83,7 @@ class Sitzung:
         self.sende_sequenz: int = 0       # Aufsteigende eigene Sequenznummer
         self.empfangs_sequenz: int = 0    # Naechste erwartete Peer-Sequenznummer
         self.schluessel: bytes = konfig.GETEILTES_GEHEIMNIS  # HMAC-Schluessel
+        self._ack_queue: queue.Queue = queue.Queue()  # Thread-sicherer ACK-Kanal: Empfangs-Thread → Sende-Thread
 
     # ---------------------------------------------------------------------------
     # Interne Hilfsmethoden
@@ -146,7 +148,11 @@ class Sitzung:
             logger.error("Verbindung unterbrochen beim Empfang: %s", fehler)
             return None
         except (OSError, ssl.SSLError, socket.timeout, TimeoutError) as fehler:
-            logger.error("Netzwerkfehler/Timeout beim Empfang: %s", fehler)
+            # Timeout ist Normalzustand bei Idle – kein echter Fehler
+            if isinstance(fehler, (socket.timeout, TimeoutError)):
+                logger.debug("Empfangs-Timeout (Idle erwartet)")
+            else:
+                logger.error("Netzwerkfehler beim Empfang: %s", fehler)
             return None
         finally:
             # Original-Timeout wiederherstellen, damit Sende-Operationen nicht blockieren
@@ -357,28 +363,21 @@ class Sitzung:
                 wartezeit = min(wartezeit * konfig.BACKOFF_FAKTOR, konfig.BACKOFF_MAX)
                 continue
 
-            # Auf ACK warten – SENDE_TIMEOUT: kurze Frist, da Antwort schnell kommen soll
+            # Auf ACK warten – aus der _ack_queue, die der Empfangs-Thread befuellt.
+            # Direktes Lesen vom Socket wuerde mit der Empfangsschleife konkurrieren
+            # und das ACK-Paket koennte von dort "gestohlen" werden (Race Condition).
             try:
-                ack = self._paket_empfangen_intern(timeout=konfig.SENDE_TIMEOUT)
-            except (OSError, ssl.SSLError, socket.timeout, TimeoutError) as fehler:
+                ack = self._ack_queue.get(timeout=konfig.SENDE_TIMEOUT)
+            except queue.Empty:
                 logger.warning(
-                    "ACK-Timeout (Versuch %d/%d, Seq %d): %s",
-                    versuch, konfig.MAX_WIEDERHOLUNGEN, seq, fehler,
+                    "Kein ACK empfangen (Versuch %d/%d, Seq %d) – Timeout nach %.1fs",
+                    versuch, konfig.MAX_WIEDERHOLUNGEN, seq, konfig.SENDE_TIMEOUT,
                 )
                 if versuch == konfig.MAX_WIEDERHOLUNGEN:
                     logger.error("Maximale Wiederholungen nach Timeout erreicht (Seq %d)", seq)
                     return False
                 time.sleep(wartezeit)
                 wartezeit = min(wartezeit * konfig.BACKOFF_FAKTOR, konfig.BACKOFF_MAX)
-                continue
-
-            if ack is None:
-                logger.warning(
-                    "Kein gueltiges ACK empfangen (Versuch %d, Seq %d)",
-                    versuch, seq,
-                )
-                if versuch == konfig.MAX_WIEDERHOLUNGEN:
-                    return False
                 continue
 
             if ack.typ == NachrichtenTyp.ACK.value and ack.sequenz == seq:
@@ -428,18 +427,23 @@ class Sitzung:
             self._socket_schliessen()
             return
 
-        # Auf ACK warten (toleriert Fehler – Peer koennte schon weg sein)
+        # Auf DISCONNECT-ACK warten.
+        # Zuerst in der _ack_queue nachsehen: Empfangs-Thread koennte das ACK
+        # bereits abgeholt und eingestellt haben, bevor er wegen TRENNEND-Zustand endet.
+        # Fallback: direkt vom Socket lesen, falls der Empfangs-Thread bereits beendet ist.
         try:
-            ack = self._paket_empfangen_intern()
-            if ack is not None and ack.typ == NachrichtenTyp.ACK.value:
+            ack = self._ack_queue.get(timeout=konfig.VERBINDUNGS_TIMEOUT)
+            if ack.typ == NachrichtenTyp.ACK.value:
                 logger.info("DISCONNECT-ACK empfangen (Seq: %d)", ack.sequenz)
             else:
+                logger.warning("Unerwartetes Paket statt DISCONNECT-ACK – fahre fort")
+        except queue.Empty:
+            # Empfangs-Thread war bereits beendet → direkt vom Socket lesen
+            ack = self._paket_empfangen_intern(timeout=konfig.VERBINDUNGS_TIMEOUT)
+            if ack is not None and ack.typ == NachrichtenTyp.ACK.value:
+                logger.info("DISCONNECT-ACK empfangen (Seq: %d, Fallback-Lesen)", ack.sequenz)
+            else:
                 logger.warning("Kein gueltiges ACK auf DISCONNECT erhalten – fahre fort")
-        except Exception as fehler:
-            logger.warning(
-                "Fehler beim Warten auf DISCONNECT-ACK (Verbindung bereits getrennt?): %s",
-                fehler,
-            )
 
         self._zustand_setzen(SitzungsZustand.GETRENNT)
         self._socket_schliessen()
@@ -489,10 +493,15 @@ class Sitzung:
             case NachrichtenTyp.DISCONNECT.value:
                 return self._handler_disconnect(ergebnis)
             case NachrichtenTyp.ACK.value:
+                # ACK in die Queue stellen, damit nachricht_senden() es abholen kann.
+                # Frueheres Verwerfen war der Grund fuer die ACK-Race-Condition:
+                # Der Empfangs-Thread las das ACK zuerst und warf es weg; der
+                # Sende-Thread bekam nie eine Bestaetigung und lief in den Timeout.
                 logger.debug(
-                    "Unerwartetes ACK empfangen (Seq: %d) – wird ignoriert",
+                    "ACK empfangen (Seq: %d) – wird an Sende-Thread weitergeleitet",
                     ergebnis.sequenz,
                 )
+                self._ack_queue.put(ergebnis)
                 return None
             case NachrichtenTyp.CONNECT.value:
                 logger.warning(
