@@ -39,6 +39,7 @@ import argparse
 import logging
 import signal
 import sys
+import threading
 import time
 
 import konfig
@@ -283,6 +284,32 @@ def client_starten(ziel: str, port: int, name: str) -> None:
     logger.info("Verbunden mit %s:%d. Nachrichten eingeben, 'quit' zum Beenden.", ziel, port)
     logger.info("-" * 60)
 
+    # Eigene Empfangsschleife im Hintergrund, damit ACKs/Nachrichten auch waehrend
+    # blockierender input()-Aufrufe verarbeitet werden.
+    stop_event = threading.Event()
+
+    def _empfangs_thread() -> None:
+        while not stop_event.is_set() and sitzung.zustand == SitzungsZustand.VERBUNDEN:
+            nachricht = sitzung.nachricht_empfangen()
+
+            if nachricht is None:
+                if sitzung.zustand == SitzungsZustand.GETRENNT:
+                    _benutzer_meldung("Verbindung wurde vom Peer beendet.")
+                    break
+                continue
+
+            absender = nachricht.get("absender", "Unbekannt")
+            zeitstempel = nachricht.get("zeitstempel", "")
+            text = nachricht.get("nachricht", "")
+            logger.info("[%s] %s: %s", zeitstempel, absender, text)
+
+    empfang_thread = threading.Thread(
+        target=_empfangs_thread,
+        daemon=True,
+        name="CLI-EmpfangsThread",
+    )
+    empfang_thread.start()
+
     # Interaktive Eingabeschleife
     while sitzung.zustand == SitzungsZustand.VERBUNDEN:
         try:
@@ -304,6 +331,8 @@ def client_starten(ziel: str, port: int, name: str) -> None:
             logger.error("Nachricht konnte nicht gesendet werden – Verbindung verloren")
             _benutzer_meldung("Nachricht konnte nicht uebertragen werden – Verbindung getrennt.")
             break
+
+    stop_event.set()
 
     # Verbindung sauber abbauen falls noch aktiv (DISCONNECT + ACK)
     if sitzung.zustand == SitzungsZustand.VERBUNDEN:
