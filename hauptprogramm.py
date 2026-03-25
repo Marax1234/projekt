@@ -180,10 +180,11 @@ def server_starten(port: int, name: str) -> None:
                 while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
                     nachricht = sitzung.nachricht_empfangen()
                     if nachricht is None:
-                        if sitzung.zustand == SitzungsZustand.GETRENNT:
+                        if sitzung.zustand != SitzungsZustand.VERBUNDEN:
                             _benutzer_meldung("Verbindung vom Client beendet.")
                             trenn_ereignis.set()
-                        break
+                            return
+                        continue  # Timeout oder Kontrollpaket (ACK) – Verbindung noch aktiv
                     absender = nachricht.get("absender", "Unbekannt")
                     zeitstempel = nachricht.get("zeitstempel", "")
                     text = nachricht.get("nachricht", "")
@@ -306,10 +307,11 @@ def client_starten(ziel: str, port: int, name: str) -> None:
         while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
             nachricht = sitzung.nachricht_empfangen()
             if nachricht is None:
-                if sitzung.zustand == SitzungsZustand.GETRENNT:
+                if sitzung.zustand != SitzungsZustand.VERBUNDEN:
                     _benutzer_meldung("Verbindung vom Server beendet.")
                     trenn_ereignis.set()
-                break
+                    return
+                continue  # Timeout oder Kontrollpaket (ACK) – Verbindung noch aktiv
             absender = nachricht.get("absender", "Unbekannt")
             zeitstempel = nachricht.get("zeitstempel", "")
             text = nachricht.get("nachricht", "")
