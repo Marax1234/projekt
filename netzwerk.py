@@ -431,7 +431,11 @@ def _exakt_lesen(verbindung: ssl.SSLSocket, anzahl_bytes: int) -> bytes:
         try:
             chunk = verbindung.recv(min(noch_noetig, konfig.PUFFER_GROESSE))
         except (OSError, ssl.SSLError) as fehler:
-            logger.error("Empfangsfehler nach %d/%d Bytes: %s", len(puffer), anzahl_bytes, fehler)
+            # Timeout ist normales Idle-Verhalten – nur echte Netzwerkfehler als ERROR
+            if isinstance(fehler, (socket.timeout, TimeoutError)):
+                logger.debug("Empfangs-Timeout nach %d/%d Bytes", len(puffer), anzahl_bytes)
+            else:
+                logger.error("Empfangsfehler nach %d/%d Bytes: %s", len(puffer), anzahl_bytes, fehler)
             raise
 
         if not chunk:

@@ -249,3 +249,107 @@
 2026-03-24 11:19:56,824 [INFO] __main__: Signal 15 empfangen – leite graceful shutdown ein
 2026-03-24 11:19:56,824 [INFO] __main__: [MELDUNG] Programm wird beendet – sende DISCONNECT ...
 2026-03-24 11:19:56,824 [INFO] __main__: Server-Socket geschlossen
+2026-03-24 11:33:30,914 [INFO] __main__: Starte P2P-Chat im GUI-Modus (Port: 6769)
+2026-03-24 11:33:47,038 [INFO] gui: Verbindungsaufbau gestartet: Modus=server Port=6769 Name=cockblock
+2026-03-24 11:33:47,039 [INFO] netzwerk: Server-Socket erstellt: lauscht auf 0.0.0.0:6769
+2026-03-24 11:33:47,039 [INFO] netzwerk: Warte auf eingehende Verbindung ...
+2026-03-24 11:33:53,916 [INFO] __main__: Starte P2P-Chat im GUI-Modus (Port: 6769)
+2026-03-24 11:34:07,898 [INFO] gui: Verbindungsaufbau gestartet: Modus=client Port=6769 Name=dominic
+2026-03-24 11:34:07,898 [INFO] netzwerk: Verbinde zu localhost:6769 ...
+2026-03-24 11:34:07,899 [INFO] netzwerk: TCP-Verbindung von 127.0.0.1:34786 akzeptiert
+2026-03-24 11:34:07,900 [INFO] netzwerk: TCP-Verbindung zu localhost:6769 hergestellt
+2026-03-24 11:34:07,909 [INFO] netzwerk: TLS 1.3 Handshake abgeschlossen – Server: localhost:6769, Cipher: ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+2026-03-24 11:34:07,910 [INFO] netzwerk: TLS 1.3 Handshake abgeschlossen – Peer: ('127.0.0.1', 34786), Cipher: ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+2026-03-24 11:34:07,910 [INFO] gui: TCP/TLS-Verbindung zu localhost:6769 hergestellt (GUI-Modus)
+2026-03-24 11:34:07,910 [INFO] gui: TCP/TLS-Verbindung von 127.0.0.1 akzeptiert (GUI-Modus)
+2026-03-24 11:34:07,910 [INFO] sitzung: Zustand: GETRENNT → VERBINDEND
+2026-03-24 11:34:07,910 [INFO] sitzung: Sende CONNECT-Paket (Seq: 1, Absender: dominic)
+2026-03-24 11:34:07,910 [INFO] sitzung: Zustand: GETRENNT → VERBINDEND
+2026-03-24 11:34:07,910 [INFO] sitzung: Warte auf CONNECT-Paket ...
+2026-03-24 11:34:07,910 [INFO] sitzung: CONNECT empfangen, sende ACK
+2026-03-24 11:34:07,910 [INFO] sitzung: Zustand: VERBINDEND → VERBUNDEN
+2026-03-24 11:34:07,910 [INFO] gui: Sitzung aktiv: Peer=127.0.0.1 Name=cockblock
+2026-03-24 11:34:07,910 [INFO] gui: Empfangsschleife gestartet
+2026-03-24 11:34:07,951 [INFO] sitzung: Zustand: VERBINDEND → VERBUNDEN
+2026-03-24 11:34:07,952 [INFO] sitzung: Verbindung aufgebaut – Sitzung aktiv (Server-ACK fuer Seq 1)
+2026-03-24 11:34:07,952 [INFO] gui: Sitzung aktiv: Peer=localhost Name=dominic
+2026-03-24 11:34:07,952 [INFO] gui: Empfangsschleife gestartet
+2026-03-24 11:34:19,306 [WARNING] sitzung: Luecke in Sequenznummern: erwartet 0, erhalten 1 – akzeptiere trotzdem
+2026-03-24 11:34:19,306 [INFO] sitzung: DATA empfangen: "hi" (Seq: 1)
+2026-03-24 11:34:19,306 [INFO] sitzung: ACK gesendet (Seq: 1)
+2026-03-24 11:34:19,306 [INFO] sitzung: DATA gesendet und bestaetigt (Seq: 1)
+2026-03-24 11:34:37,941 [ERROR] netzwerk: Empfangsfehler nach 0/4 Bytes: The read operation timed out
+2026-03-24 11:34:37,941 [ERROR] sitzung: Netzwerkfehler/Timeout beim Empfang: The read operation timed out
+2026-03-24 11:34:49,336 [ERROR] netzwerk: Empfangsfehler nach 0/4 Bytes: The read operation timed out
+2026-03-24 11:34:49,336 [ERROR] sitzung: Netzwerkfehler/Timeout beim Empfang: The read operation timed out
+2026-03-24 11:35:07,971 [ERROR] netzwerk: Empfangsfehler nach 0/4 Bytes: The read operation timed out
+2026-03-24 11:35:07,971 [ERROR] sitzung: Netzwerkfehler/Timeout beim Empfang: The read operation timed out
+2026-03-24 11:35:15,358 [INFO] sitzung: DATA empfangen: "hi" (Seq: 2)
+2026-03-24 11:35:15,358 [INFO] sitzung: ACK gesendet (Seq: 2)
+2026-03-24 11:35:25,368 [ERROR] netzwerk: Empfangsfehler nach 0/4 Bytes: The read operation timed out
+2026-03-24 11:35:25,369 [ERROR] sitzung: Netzwerkfehler/Timeout beim Empfang: The read operation timed out
+2026-03-24 11:35:25,369 [WARNING] sitzung: Kein gueltiges ACK empfangen (Versuch 1, Seq 2)
+2026-03-24 11:35:25,369 [WARNING] sitzung: Doppelte/veraltete Sequenznummer 2 verworfen (erwartet >= 3)
+2026-03-24 11:35:35,379 [ERROR] netzwerk: Empfangsfehler nach 0/4 Bytes: The read operation timed out
+2026-03-24 11:35:35,380 [ERROR] sitzung: Netzwerkfehler/Timeout beim Empfang: The read operation timed out
+2026-03-24 11:35:35,380 [WARNING] sitzung: Kein gueltiges ACK empfangen (Versuch 2, Seq 2)
+2026-03-24 11:35:35,380 [WARNING] sitzung: Doppelte/veraltete Sequenznummer 2 verworfen (erwartet >= 3)
+2026-03-24 11:35:45,387 [ERROR] netzwerk: Empfangsfehler nach 0/4 Bytes: The read operation timed out
+2026-03-24 11:35:45,388 [ERROR] sitzung: Netzwerkfehler/Timeout beim Empfang: The read operation timed out
+2026-03-24 11:35:45,390 [ERROR] netzwerk: Empfangsfehler nach 0/4 Bytes: The read operation timed out
+2026-03-24 11:35:45,390 [ERROR] sitzung: Netzwerkfehler/Timeout beim Empfang: The read operation timed out
+2026-03-24 11:35:45,390 [WARNING] sitzung: Kein gueltiges ACK empfangen (Versuch 3, Seq 2)
+2026-03-24 11:36:00,453 [INFO] sitzung: Zustand: VERBUNDEN → TRENNEND
+2026-03-24 11:36:00,453 [INFO] sitzung: Sende DISCONNECT-Paket (Seq: 2)
+2026-03-24 11:36:00,454 [INFO] sitzung: DISCONNECT empfangen, sende ACK
+2026-03-24 11:36:00,454 [INFO] sitzung: Zustand: VERBUNDEN → GETRENNT
+2026-03-24 11:36:00,454 [INFO] sitzung: DISCONNECT-ACK empfangen (Seq: 2)
+2026-03-24 11:36:00,454 [INFO] sitzung: Verbindung vollstaendig geschlossen
+2026-03-24 11:36:00,454 [INFO] sitzung: Zustand: TRENNEND → GETRENNT
+2026-03-24 11:36:00,454 [ERROR] sitzung: Verbindung unterbrochen beim Empfang: Verbindung getrennt nach 0/4 Bytes
+2026-03-24 11:36:00,454 [INFO] sitzung: Verbindung vollstaendig geschlossen
+2026-03-24 12:06:59,249 [INFO] __main__: Starte P2P-Chat im GUI-Modus (Port: 6769)
+2026-03-24 12:07:10,218 [INFO] gui: Verbindungsaufbau gestartet: Modus=server Port=6769 Name=michaelsarsch
+2026-03-24 12:07:10,218 [INFO] netzwerk: Server-Socket erstellt: lauscht auf 0.0.0.0:6769
+2026-03-24 12:07:10,219 [INFO] netzwerk: Warte auf eingehende Verbindung ...
+2026-03-24 12:07:12,686 [INFO] __main__: Starte P2P-Chat im GUI-Modus (Port: 6769)
+2026-03-24 12:07:19,898 [INFO] gui: Verbindungsaufbau gestartet: Modus=client Port=6769 Name=Alice
+2026-03-24 12:07:19,899 [INFO] netzwerk: Verbinde zu localhost:6769 ...
+2026-03-24 12:07:19,899 [INFO] netzwerk: TCP-Verbindung von 127.0.0.1:45848 akzeptiert
+2026-03-24 12:07:19,900 [INFO] netzwerk: TCP-Verbindung zu localhost:6769 hergestellt
+2026-03-24 12:07:19,910 [INFO] netzwerk: TLS 1.3 Handshake abgeschlossen – Server: localhost:6769, Cipher: ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+2026-03-24 12:07:19,910 [INFO] gui: TCP/TLS-Verbindung zu localhost:6769 hergestellt (GUI-Modus)
+2026-03-24 12:07:19,910 [INFO] netzwerk: TLS 1.3 Handshake abgeschlossen – Peer: ('127.0.0.1', 45848), Cipher: ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+2026-03-24 12:07:19,910 [INFO] sitzung: Zustand: GETRENNT → VERBINDEND
+2026-03-24 12:07:19,910 [INFO] gui: TCP/TLS-Verbindung von 127.0.0.1 akzeptiert (GUI-Modus)
+2026-03-24 12:07:19,910 [INFO] sitzung: Sende CONNECT-Paket (Seq: 1, Absender: Alice)
+2026-03-24 12:07:19,910 [INFO] sitzung: Zustand: GETRENNT → VERBINDEND
+2026-03-24 12:07:19,910 [INFO] sitzung: Warte auf CONNECT-Paket ...
+2026-03-24 12:07:19,911 [INFO] sitzung: CONNECT empfangen, sende ACK
+2026-03-24 12:07:19,911 [INFO] sitzung: Zustand: VERBINDEND → VERBUNDEN
+2026-03-24 12:07:19,911 [INFO] gui: Sitzung aktiv: Peer=127.0.0.1 Name=michaelsarsch
+2026-03-24 12:07:19,911 [INFO] gui: Empfangsschleife gestartet
+2026-03-24 12:07:19,951 [INFO] sitzung: Zustand: VERBINDEND → VERBUNDEN
+2026-03-24 12:07:19,952 [INFO] sitzung: Verbindung aufgebaut – Sitzung aktiv (Server-ACK fuer Seq 1)
+2026-03-24 12:07:19,952 [INFO] gui: Sitzung aktiv: Peer=localhost Name=Alice
+2026-03-24 12:07:19,952 [INFO] gui: Empfangsschleife gestartet
+2026-03-24 12:07:33,834 [INFO] sitzung: DATA empfangen: "sdf" (Seq: 2)
+2026-03-24 12:07:33,834 [INFO] sitzung: ACK gesendet (Seq: 2)
+2026-03-24 12:07:33,835 [INFO] sitzung: DATA gesendet und bestaetigt (Seq: 2)
+2026-03-24 12:07:36,783 [INFO] sitzung: DATA empfangen: "ich" (Seq: 3)
+2026-03-24 12:07:36,783 [INFO] sitzung: ACK gesendet (Seq: 3)
+2026-03-24 12:07:36,783 [INFO] sitzung: DATA gesendet und bestaetigt (Seq: 3)
+2026-03-24 12:07:38,371 [INFO] sitzung: DATA empfangen: "bin +" (Seq: 4)
+2026-03-24 12:07:38,372 [INFO] sitzung: ACK gesendet (Seq: 4)
+2026-03-24 12:07:38,372 [INFO] sitzung: DATA gesendet und bestaetigt (Seq: 4)
+2026-03-24 12:07:39,656 [INFO] sitzung: DATA empfangen: "hier" (Seq: 5)
+2026-03-24 12:07:39,656 [INFO] sitzung: ACK gesendet (Seq: 5)
+2026-03-24 12:07:39,656 [INFO] sitzung: DATA gesendet und bestaetigt (Seq: 5)
+2026-03-24 12:10:08,071 [INFO] sitzung: Zustand: VERBUNDEN → TRENNEND
+2026-03-24 12:10:08,071 [INFO] sitzung: Sende DISCONNECT-Paket (Seq: 6)
+2026-03-24 12:10:08,072 [INFO] sitzung: DISCONNECT empfangen, sende ACK
+2026-03-24 12:10:08,072 [INFO] sitzung: Zustand: VERBUNDEN → GETRENNT
+2026-03-24 12:10:08,073 [INFO] sitzung: Verbindung vollstaendig geschlossen
+2026-03-24 12:10:08,073 [INFO] sitzung: DISCONNECT-ACK empfangen (Seq: 6)
+2026-03-24 12:10:08,073 [INFO] sitzung: Zustand: TRENNEND → GETRENNT
+2026-03-24 12:10:08,073 [INFO] sitzung: Verbindung vollstaendig geschlossen
