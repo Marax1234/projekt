@@ -39,6 +39,7 @@ import argparse
 import logging
 import signal
 import sys
+import threading
 import time
 
 import konfig
@@ -170,33 +171,48 @@ def server_starten(port: int, name: str) -> None:
                 _aktive_sitzung = None
                 continue  # Naechsten Client erwarten
 
-            _benutzer_meldung(f"Client verbunden von {adresse[0]}. Empfange Nachrichten ...")
+            _benutzer_meldung(f"Client verbunden von {adresse[0]}. Nachrichten eingeben, 'quit' zum Beenden.")
 
-            # Nachrichten-Empfangsschleife mit Timeout-Behandlung (Task 4.1)
-            while sitzung.zustand == SitzungsZustand.VERBUNDEN:
-                nachricht = sitzung.nachricht_empfangen()
-                # nachricht_empfangen() gibt None zurueck bei:
-                #   - DISCONNECT empfangen → Zustand wechselt zu GETRENNT
-                #   - Timeout (EMPFANG_TIMEOUT) → Zustand bleibt VERBUNDEN
-                #   - Schwerer Netzwerkfehler → Zustand wechselt zu GETRENNT
+            trenn_ereignis = threading.Event()
 
-                if nachricht is None:
-                    if sitzung.zustand == SitzungsZustand.GETRENNT:
-                        # Normaler Abbau oder Verbindungsfehler
-                        _benutzer_meldung(
-                            "Verbindung beendet. Warte auf naechsten Client."
-                        )
-                    else:
-                        # Timeout: kein Paket empfangen, aber Verbindung noch aktiv
-                        logger.debug("Empfangs-Timeout – Verbindung noch aktiv, weiter warten")
-                    break  # Innere Schleife verlassen, aeussere Schleife prueft Zustand
+            def empfangs_schleife() -> None:
+                """Empfaengt Nachrichten in einem Hintergrund-Thread."""
+                while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
+                    nachricht = sitzung.nachricht_empfangen()
+                    if nachricht is None:
+                        if sitzung.zustand == SitzungsZustand.GETRENNT:
+                            _benutzer_meldung("Verbindung vom Client beendet.")
+                            trenn_ereignis.set()
+                        break
+                    absender = nachricht.get("absender", "Unbekannt")
+                    zeitstempel = nachricht.get("zeitstempel", "")
+                    text = nachricht.get("nachricht", "")
+                    print(f"\r[{zeitstempel}] {absender}: {text}\n> ", end="", flush=True)
+                    logger.info("[%s] %s: %s", zeitstempel, absender, text)
+                trenn_ereignis.set()
 
-                # Empfangene Nachricht ausgeben
-                absender = nachricht.get("absender", "Unbekannt")
-                zeitstempel = nachricht.get("zeitstempel", "")
-                text = nachricht.get("nachricht", "")
-                logger.info("[%s] %s: %s", zeitstempel, absender, text)
+            empfangs_thread = threading.Thread(target=empfangs_schleife, daemon=True, name="ServerEmpfang")
+            empfangs_thread.start()
 
+            # Sende-Schleife im Haupt-Thread
+            while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
+                try:
+                    eingabe = input("> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    break
+                if not eingabe:
+                    continue
+                if eingabe.lower() in ("quit", "exit", "q"):
+                    break
+                if not sitzung.nachricht_senden(eingabe):
+                    _benutzer_meldung("Nachricht konnte nicht uebertragen werden – Verbindung getrennt.")
+                    break
+
+            trenn_ereignis.set()
+            if sitzung.zustand == SitzungsZustand.VERBUNDEN:
+                sitzung.verbindungsabbau()
+            empfangs_thread.join(timeout=2.0)
+            _benutzer_meldung("Verbindung beendet. Warte auf naechsten Client.")
             _aktive_sitzung = None
 
     finally:
@@ -283,31 +299,49 @@ def client_starten(ziel: str, port: int, name: str) -> None:
     logger.info("Verbunden mit %s:%d. Nachrichten eingeben, 'quit' zum Beenden.", ziel, port)
     logger.info("-" * 60)
 
-    # Interaktive Eingabeschleife
-    while sitzung.zustand == SitzungsZustand.VERBUNDEN:
+    trenn_ereignis = threading.Event()
+
+    def empfangs_schleife() -> None:
+        """Empfaengt Nachrichten vom Server in einem Hintergrund-Thread."""
+        while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
+            nachricht = sitzung.nachricht_empfangen()
+            if nachricht is None:
+                if sitzung.zustand == SitzungsZustand.GETRENNT:
+                    _benutzer_meldung("Verbindung vom Server beendet.")
+                    trenn_ereignis.set()
+                break
+            absender = nachricht.get("absender", "Unbekannt")
+            zeitstempel = nachricht.get("zeitstempel", "")
+            text = nachricht.get("nachricht", "")
+            print(f"\r[{zeitstempel}] {absender}: {text}\n> ", end="", flush=True)
+            logger.info("[%s] %s: %s", zeitstempel, absender, text)
+        trenn_ereignis.set()
+
+    empfangs_thread = threading.Thread(target=empfangs_schleife, daemon=True, name="ClientEmpfang")
+    empfangs_thread.start()
+
+    # Interaktive Eingabeschleife im Haupt-Thread
+    while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
         try:
             eingabe = input("> ").strip()
         except (EOFError, KeyboardInterrupt):
-            # Ctrl+D oder Ctrl+C: sauberer Abbruch (Signal-Handler sendet DISCONNECT)
             logger.info("Eingabe unterbrochen – trenne Verbindung")
             break
-
         if not eingabe:
-            continue  # Leere Eingabe ignorieren
-
+            continue
         if eingabe.lower() in ("quit", "exit", "q"):
             logger.info("Nutzer hat Verbindungsabbau angefordert")
             break
-
-        # Nachricht senden (nachricht_senden hat eigene Retry-Logik)
         if not sitzung.nachricht_senden(eingabe):
             logger.error("Nachricht konnte nicht gesendet werden – Verbindung verloren")
             _benutzer_meldung("Nachricht konnte nicht uebertragen werden – Verbindung getrennt.")
             break
 
+    trenn_ereignis.set()
     # Verbindung sauber abbauen falls noch aktiv (DISCONNECT + ACK)
     if sitzung.zustand == SitzungsZustand.VERBUNDEN:
         sitzung.verbindungsabbau()
+    empfangs_thread.join(timeout=2.0)
 
     _aktive_sitzung = None
     logger.info("Client-Sitzung beendet")
