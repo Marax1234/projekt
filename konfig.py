@@ -72,7 +72,7 @@ KEEPALIVE_PROBES: int = 5            # Anzahl Probes bevor Verbindung als tot gi
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-LOG_LEVEL: str = "INFO"              # Standard-Log-Level (DEBUG, INFO, WARNING, ERROR)
+LOG_LEVEL: str = "WARNING"              # Standard-Log-Level (DEBUG, INFO, WARNING, ERROR)
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_DATEINAME: str = "p2pchat.log"   # Log-Datei im Projektverzeichnis
 

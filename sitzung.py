@@ -306,6 +306,8 @@ class Sitzung:
             self._zustand_setzen(SitzungsZustand.GETRENNT)
             return False
 
+        # Server-sende_sequenz startet bei 0; erste DATA vom Server hat Seq 1
+        self.empfangs_sequenz = 1
         self._zustand_setzen(SitzungsZustand.VERBUNDEN)
         logger.info("Verbindung aufgebaut – Sitzung aktiv (Server-ACK fuer Seq %d)", ergebnis.sequenz)
         return True
