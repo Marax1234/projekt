@@ -34,37 +34,12 @@ Verwendung:
 
 import argparse
 import logging
-import signal
 import sys
 
 import konfig
 import konsole
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Signal-Handler
-# ---------------------------------------------------------------------------
-
-def _signal_handler(sig: int, _frame) -> None:
-    """Faengt SIGINT und SIGTERM ab, sendet DISCONNECT und beendet sauber.
-
-    Parameter:
-        sig:    Empfangenes Signal (z. B. signal.SIGINT = 2)
-        _frame: Aktueller Stack-Frame (nicht verwendet)
-    """
-    from sitzung import SitzungsZustand
-    logger.info("Signal %d empfangen – leite graceful shutdown ein", sig)
-
-    sitzung = konsole.aktive_sitzung()
-    if sitzung is not None and sitzung.zustand == SitzungsZustand.VERBUNDEN:
-        try:
-            sitzung.verbindungsabbau()
-        except Exception as fehler:
-            logger.warning("Fehler beim Verbindungsabbau im Signal-Handler: %s", fehler)
-
-    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +145,6 @@ def main() -> None:
 
     log_level = "DEBUG" if args.debug else konfig.LOG_LEVEL
     _logging_initialisieren(log_level)
-
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
-    logger.debug("Signal-Handler fuer SIGINT und SIGTERM registriert")
 
     # GUI-Modus hat Vorrang
     if args.gui:

@@ -1,7 +1,7 @@
 # P2P Chat – Startanleitung
 
 **Kurs:** Network Security 2026 | **Gruppe 2**
-**Protokoll:** P2PChat v1.0 | **Port:** 6769 | **TLS 1.3 + HMAC-SHA256**
+**Protokoll:** P2PChat v1.0 | **Port:** 6769 | **TLS**
 
 ---
 
@@ -102,8 +102,8 @@ tshark -i eth0 -f "tcp port 6769" -Y "tls.handshake"
 # Aufzeichnung in Datei speichern:
 tshark -i eth0 -f "tcp port 6769" -w capture.pcapng
 
-# In Wireshark: Analyze → Expert Information zeigt TLS 1.3 Cipher Suite
-# Erwartung: TLSv1.3, Cipher: TLS_AES_256_GCM_SHA384, Payload verschluesselt
+# In Wireshark: Analyze → Expert Information zeigt TLS Cipher Suite
+# Erwartung: TLS-Handshake sichtbar, Payload verschluesselt
 ```
 
 ---
@@ -116,33 +116,29 @@ Die Anwendung schreibt alle Ereignisse in `p2pchat.log` (im Projektverzeichnis):
 # Log in Echtzeit verfolgen:
 tail -f p2pchat.log
 
-# Log-Level erhoehen (DEBUG zeigt HMAC, Sequenznummern, Paketdetails):
+# Log-Level erhoehen (DEBUG zeigt Nachrichtendetails):
 python3 hauptprogramm.py --gui --debug
 ```
 
 Log-Phasen:
-- **Verbindungsaufbau:** TCP-Handshake, TLS 1.3, CONNECT/ACK
-- **Datenuebertragung:** DATA-Pakete, HMAC-Pruefung, ACK-Sequenzen
-- **Fehler:** Timeout, HMAC-Fehler, Verbindungsabbruch
-- **Verbindungsabbau:** DISCONNECT/ACK, Socket-Schliessen
+- **Verbindungsaufbau:** TCP-Verbindung, TLS-Handshake
+- **Datenuebertragung:** Nachrichten
+- **Fehler:** Timeout, Verbindungsabbruch
+- **Verbindungsabbau:** Socket-Schliessen
 
 ---
 
 ## Protokoll-Uebersicht
 
-| Feld     | Groesse | Wert                           |
-|----------|---------|--------------------------------|
-| Version  | 1 Byte  | `0x01`                         |
-| Typ      | 1 Byte  | CONNECT=01, DATA=02, DISCONNECT=03, ACK=04 |
-| Sequenz  | 4 Byte  | uint32, aufsteigend            |
-| Laenge   | 4 Byte  | uint32, Payload-Laenge         |
-| HMAC     | 32 Byte | HMAC-SHA256 ueber Header+Payload |
-| Payload  | n Byte  | UTF-8-JSON                     |
+Jede Nachricht wird als JSON-Objekt mit den Feldern `nachricht`, `zeitstempel`
+und `absender` als UTF-8-codierte Bytes direkt ueber den TLS-Kanal uebertragen.
+
+```
+| JSON-Payload (n B, UTF-8) |
+```
 
 **Sicherheit:**
-- **Vertraulichkeit:** TLS 1.3 (AES-256-GCM) – gesamter Kanal verschluesselt
-- **Integritaet:** HMAC-SHA256 auf Anwendungsschicht pro Paket
-- **Verfuegbarkeit:** TCP-Keepalive, exponentieller Backoff, Reconnect
+- **Vertraulichkeit & Integritaet:** TLS (AEAD-Verschluesselung) – gesamter Kanal verschluesselt und integritaetsgesichert
 
 ---
 
@@ -151,10 +147,9 @@ Log-Phasen:
 | Datei              | Beschreibung                              |
 |--------------------|-------------------------------------------|
 | `konfig.py`        | Alle Konstanten (Port, Timeouts, Pfade)   |
-| `protokoll.py`     | Binaeres Paketformat, Pack/Unpack         |
-| `krypto.py`        | HMAC-SHA256 Integritaetspruefung          |
+| `krypto.py`        | Begruendung, warum TLS eigenen Krypto-Code ersetzt |
 | `netzwerk.py`      | TCP/TLS-Verbindungsverwaltung             |
-| `sitzung.py`       | Sitzungslebenszyklus, Sequenznummern      |
+| `sitzung.py`       | Sitzungslebenszyklus, Nachrichten senden/empfangen |
 | `gui.py`           | Tkinter-Oberflaeche (Dark Mode)           |
 | `hauptprogramm.py` | Einstiegspunkt, argparse, Orchestrierung  |
 | `zertifikat.pem`   | Self-Signed TLS-Zertifikat                |
@@ -169,5 +164,4 @@ Log-Phasen:
 | `Port already in use`            | `sudo lsof -i :6769` – alten Prozess beenden        |
 | `SSL: CERTIFICATE_VERIFY_FAILED` | `zertifikat.pem` fehlt auf Client-VM                |
 | `Connection refused`             | Server noch nicht gestartet oder IP falsch          |
-| `HMAC-Pruefung fehlgeschlagen`   | Geteiltes Geheimnis stimmt nicht ueberein (`konfig.py`) |
 | GUI startet nicht                | `python3 -c "import tkinter"` – tkinter pruefen     |

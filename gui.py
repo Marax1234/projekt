@@ -294,7 +294,7 @@ class ChatApp(tk.Tk):
         - Thread-sicheres Empfangen via queue.Queue + root.after() (Task 5.4)
         - Senden-Button + Enter-Taste (Task 5.5)
         - Nachrichtenformatierung mit Zeitstempel (Task 5.6)
-        - Graceful Disconnect bei Fenster-Schliessen (Task 5.7)
+        - Verbindungsabbau bei Fenster-Schliessen (Task 5.7)
         - Scrollbar mit Auto-Scroll (Task 5.8)
     """
 
@@ -571,7 +571,7 @@ class ChatApp(tk.Tk):
         thread.start()
 
     def _verbindung_aufbauen_thread(self, params: dict) -> None:
-        """Baut TLS-Verbindung und Protokoll-Handshake im Hintergrund auf.
+        """Baut TLS-Verbindung im Hintergrund auf.
 
         Nach erfolgreichem Aufbau wird direkt in die Empfangsschleife uebergegangen.
         Alle Ergebnisse werden via QueueEreignis an den GUI-Thread gemeldet.
@@ -614,15 +614,7 @@ class ChatApp(tk.Tk):
             )
             self._sitzung = sitzung
 
-            # Protokoll-Handshake (CONNECT/ACK)
-            self._gui_queue.put(QueueEreignis("status", "  TLS-Handshake ..."))
-            if not sitzung.verbindungsaufbau():
-                logger.error("Protokoll-Handshake (CONNECT/ACK) fehlgeschlagen (GUI-Modus)")
-                self._gui_queue.put(QueueEreignis(
-                    "fehler", "Protokoll-Handshake fehlgeschlagen."
-                ))
-                return
-
+            # TCP+TLS haben den Verbindungsaufbau abgeschlossen – Sitzung ist direkt aktiv
             logger.info("Sitzung aktiv: Peer=%s Name=%s", peer_ip, name)
 
             # Verbindung erfolgreich – GUI benachrichtigen
@@ -657,9 +649,9 @@ class ChatApp(tk.Tk):
                 nachricht = sitzung.nachricht_empfangen()
 
                 if nachricht is None:
-                    # None zurueck: Timeout (Verbindung noch aktiv) oder Disconnect
+                    # None zurueck: Timeout (Verbindung noch aktiv) oder Verbindungsabbruch
                     if sitzung.zustand != SitzungsZustand.VERBUNDEN:
-                        # Sitzung wurde durch DISCONNECT oder Fehler getrennt
+                        # Sitzung wurde durch Verbindungsabbruch oder Fehler getrennt
                         self._gui_queue.put(QueueEreignis("getrennt", None))
                         return
                     # Timeout: normal, weiter auf naechste Nachricht warten
@@ -718,7 +710,7 @@ class ChatApp(tk.Tk):
                 peer_ip = ereignis.daten.get("peer_ip", "?")
                 name    = ereignis.daten.get("name", "")
                 self._status_setzen(f"  Verbunden mit {peer_ip}", "verbunden")
-                self._peer_label.configure(text=f"TLS 1.3  |  {name}  ")
+                self._peer_label.configure(text=f"TLS  |  {name}  ")
                 # Eingabe aktivieren (Task 5.5)
                 self._eingabe_feld.configure(state="normal")
                 self._senden_btn.configure(state="normal")
@@ -879,13 +871,13 @@ class ChatApp(tk.Tk):
     # -----------------------------------------------------------------------
 
     def _fenster_schliessen(self) -> None:
-        """WM_DELETE_WINDOW-Handler: DISCONNECT senden, Threads beenden, Fenster schliessen.
+        """WM_DELETE_WINDOW-Handler: Verbindung schliessen, Threads beenden, Fenster schliessen.
 
         Ablauf:
             1. Doppelaufruf verhindern (_schliessen_laeuft-Flag)
             2. Eingabe sofort deaktivieren
             3. Queue-Polling stoppen
-            4. DISCONNECT im Hintergrund senden (sitzung.verbindungsabbau())
+            4. Verbindungsabbau im Hintergrund (sitzung.verbindungsabbau())
             5. Server-Socket schliessen
             6. Fenster nach Abschluss (oder max. 2s) zerstoeren
         """
@@ -902,7 +894,7 @@ class ChatApp(tk.Tk):
         self._queue_aktiv = False
 
         def _disconnect_und_destroy() -> None:
-            """Sendet DISCONNECT und schliesst alle Ressourcen."""
+            """Schliesst Verbindung und alle Ressourcen."""
             if (self._sitzung is not None and
                     self._sitzung.zustand == SitzungsZustand.VERBUNDEN):
                 try:
@@ -919,11 +911,11 @@ class ChatApp(tk.Tk):
             # GUI-Thread: Fenster zerstoeren
             self.after(0, self.destroy)
 
-        # Disconnect in Hintergrund-Thread (blockiert nicht die GUI)
+        # Verbindungsabbau in Hintergrund-Thread (blockiert nicht die GUI)
         thread = threading.Thread(
             target=_disconnect_und_destroy,
             daemon=True,
-            name="DisconnectThread",
+            name="VerbindungsabbauThread",
         )
         thread.start()
 

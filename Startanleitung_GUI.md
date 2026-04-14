@@ -96,7 +96,7 @@ Im Startdialog:
 - Nachricht ins **Eingabefeld** (unten) tippen
 - **Enter** oder **Senden**-Button drücken
 - Nachricht erscheint im Verlauf beider VMs
-- Statusleiste zeigt: Verbindungsstatus, Peer-IP, TLS 1.3 Info
+- Statusleiste zeigt: Verbindungsstatus, Peer-IP, TLS Info
 
 ---
 
