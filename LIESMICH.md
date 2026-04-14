@@ -147,7 +147,6 @@ und `absender` als UTF-8-codierte Bytes direkt ueber den TLS-Kanal uebertragen.
 | Datei              | Beschreibung                              |
 |--------------------|-------------------------------------------|
 | `konfig.py`        | Alle Konstanten (Port, Timeouts, Pfade)   |
-| `krypto.py`        | Begruendung, warum TLS eigenen Krypto-Code ersetzt |
 | `netzwerk.py`      | TCP/TLS-Verbindungsverwaltung             |
 | `sitzung.py`       | Sitzungslebenszyklus, Nachrichten senden/empfangen |
 | `gui.py`           | Tkinter-Oberflaeche (Dark Mode)           |

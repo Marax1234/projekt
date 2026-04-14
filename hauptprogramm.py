@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _logging_initialisieren(level: str) -> None:
-    """Konfiguriert das Logging-System fuer die gesamte Anwendung.
+    """Konfiguriert das Logging-System für die gesamte Anwendung.
 
     Parameter:
         level: Log-Level als String (DEBUG, INFO, WARNING, ERROR)
@@ -69,7 +69,7 @@ def _logging_initialisieren(level: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _argumente_parsen() -> argparse.Namespace:
-    """Parst die Kommandozeilenargumente und gibt ein Namespace-Objekt zurueck."""
+    """Parst die Kommandozeilenargumente und gibt ein Namespace-Objekt zurück."""
     parser = argparse.ArgumentParser(
         prog="hauptprogramm.py",
         description="P2P-Chat-Protokoll – Network Security 2026",
@@ -84,7 +84,7 @@ def _argumente_parsen() -> argparse.Namespace:
         "--gui",
         action="store_true",
         default=False,
-        help="Startet die grafische Tkinter-Oberflaeche (--modus nicht erforderlich)",
+        help="Startet die grafische Tkinter-Oberfläche (--modus nicht erforderlich)",
     )
     parser.add_argument(
         "--modus",
@@ -108,7 +108,7 @@ def _argumente_parsen() -> argparse.Namespace:
     parser.add_argument(
         "--name",
         default=None,
-        help="Anzeigename fuer diesen Peer (Standard: 'Server' oder 'Client')",
+        help="Anzeigename für diesen Peer (Standard: 'Server' oder 'Client')",
     )
     parser.add_argument(
         "--debug",
@@ -120,17 +120,17 @@ def _argumente_parsen() -> argparse.Namespace:
 
 
 # ---------------------------------------------------------------------------
-# GUI-Start (lazy import – tkinter nur laden wenn wirklich benoetigt)
+# GUI-Start (lazy import – tkinter nur laden wenn wirklich benötigt)
 # ---------------------------------------------------------------------------
 
 def _gui_starten() -> None:
-    """Startet die grafische Tkinter-Oberflaeche."""
+    """Startet die grafische Tkinter-Oberfläche."""
     try:
         from gui import gui_starten
         gui_starten()
     except ImportError as fehler:
         logger.error("GUI-Modul konnte nicht geladen werden: %s", fehler)
-        print("GUI nicht verfuegbar – tkinter moeglicherweise nicht installiert.")
+        print("GUI nicht verfügbar – tkinter möglicherweise nicht installiert.")
         sys.exit(1)
 
 
@@ -140,7 +140,7 @@ def _gui_starten() -> None:
 
 def main() -> None:
     """Parst Argumente, initialisiert Logging, registriert Signal-Handler
-    und startet den gewaehlten Modus (GUI oder Konsole)."""
+    und startet den gewählten Modus (GUI oder Konsole)."""
     args = _argumente_parsen()
 
     log_level = "DEBUG" if args.debug else konfig.LOG_LEVEL
@@ -155,7 +155,7 @@ def main() -> None:
     # Konsolenmodus: --modus ist Pflichtangabe
     if not args.modus:
         logger.error("--modus (server|client) oder --gui ist erforderlich")
-        print("Fehler: --modus server|client angeben oder --gui fuer die GUI nutzen.")
+        print("Fehler: --modus server|client angeben oder --gui für die GUI nutzen.")
         sys.exit(1)
 
     if args.modus == "client" and not args.ziel:

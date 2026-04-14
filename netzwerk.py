@@ -1,8 +1,8 @@
 """
 netzwerk.py – TCP/TLS-Verbindung, Senden, Empfangen
 
-Beschreibung: Verwaltet TCP-Sockets mit TLS-Verschluesselung. Stellt Funktionen
-              fuer Verbindungsaufbau (Server + Client), Daten senden und empfangen
+Beschreibung: Verwaltet TCP-Sockets mit TLS-Verschlüsselung. Stellt Funktionen
+              für Verbindungsaufbau (Server + Client), Daten senden und empfangen
               bereit.
 Autor:        Gruppe 2
 Datum:        2026-03-24
@@ -27,7 +27,7 @@ Testschritte (2 Terminals):
 
     Wireshark-Validierung:
         tshark -i eth0 -f \"tcp port 6769\" -Y \"tls.handshake\" -c 10
-        # Erwartung: TLS-Handshake sichtbar, Payload verschluesselt
+        # Erwartung: TLS-Handshake sichtbar, Payload verschlüsselt
 """
 
 import logging
@@ -41,26 +41,26 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Task 2.2 – TLS-Kontext fuer den Server
+# Task 2.2 – TLS-Kontext für den Server
 # ---------------------------------------------------------------------------
 
 def tls_kontext_server() -> ssl.SSLContext:
-    """Erstellt den TLS-Kontext fuer die Server-Seite.
+    """Erstellt den TLS-Kontext für die Server-Seite.
 
-    Laedt Zertifikat und privaten Schluessel aus den in konfig.py
+    Lädt Zertifikat und privaten Schlüssel aus den in konfig.py
     definierten Pfaden.
 
-    Rueckgabe:
-        Fertig konfigurierter ssl.SSLContext fuer den Server.
+    Rückgabe:
+        Fertig konfigurierter ssl.SSLContext für den Server.
 
     Wirft:
-        ssl.SSLError: Bei ungueltigem Zertifikat oder Schluessel.
-        FileNotFoundError: Wenn Zertifikat- oder Schluesseldatei fehlt.
+        ssl.SSLError: Bei ungültigem Zertifikat oder Schlüssel.
+        FileNotFoundError: Wenn Zertifikat- oder Schlüsseldatei fehlt.
     """
-    # SERVER_AUTH: Server authentifiziert sich gegenueber dem Client
+    # SERVER_AUTH: Server authentifiziert sich gegenüber dem Client
     kontext = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 
-    # Zertifikat und privaten Schluessel laden
+    # Zertifikat und privaten Schlüssel laden
     kontext.load_cert_chain(
         certfile=str(konfig.ZERTIFIKAT_PFAD),
         keyfile=str(konfig.SCHLUESSEL_PFAD),
@@ -74,24 +74,24 @@ def tls_kontext_server() -> ssl.SSLContext:
 
 
 # ---------------------------------------------------------------------------
-# Task 2.3 – TLS-Kontext fuer den Client
+# Task 2.3 – TLS-Kontext für den Client
 # ---------------------------------------------------------------------------
 
 def tls_kontext_client() -> ssl.SSLContext:
-    """Erstellt den TLS-Kontext fuer die Client-Seite.
+    """Erstellt den TLS-Kontext für die Client-Seite.
 
-    Fuer die Entwicklungsumgebung mit Self-Signed-Zertifikaten wird die
-    Zertifikatspruefung deaktiviert (CERT_NONE, check_hostname=False).
+    Für die Entwicklungsumgebung mit Self-Signed-Zertifikaten wird die
+    Zertifikatsprüfung deaktiviert (CERT_NONE, check_hostname=False).
 
-    Rueckgabe:
-        Fertig konfigurierter ssl.SSLContext fuer den Client.
+    Rückgabe:
+        Fertig konfigurierter ssl.SSLContext für den Client.
     """
-    # CLIENT_AUTH: Fuer die Verbindung als Client verwenden
+    # CLIENT_AUTH: Für die Verbindung als Client verwenden
     kontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
     # Dev-Modus: Self-Signed-Zertifikat akzeptieren (kein CA-Verify)
-    kontext.check_hostname = False          # Hostname-Pruefung deaktiviert
-    kontext.verify_mode = ssl.CERT_NONE    # Zertifikatspruefung deaktiviert
+    kontext.check_hostname = False          # Hostname-Prüfung deaktiviert
+    kontext.verify_mode = ssl.CERT_NONE    # Zertifikatsprüfung deaktiviert
 
     logger.debug("TLS-Client-Kontext erstellt: verify_mode=CERT_NONE")
     return kontext
@@ -102,27 +102,27 @@ def tls_kontext_client() -> ssl.SSLContext:
 # ---------------------------------------------------------------------------
 
 def server_erstellen() -> socket.socket:
-    """Erstellt und bindet einen TCP-Socket fuer den Server-Betrieb.
+    """Erstellt und bindet einen TCP-Socket für den Server-Betrieb.
 
     Der Socket wird an BIND_ADRESSE:PORT gebunden, auf SO_REUSEADDR
     gesetzt (schneller Neustart nach Absturz) und in den Lausch-Zustand
     versetzt.
 
-    Rueckgabe:
+    Rückgabe:
         Gebundener und lauschender TCP-Socket (noch ohne TLS).
 
     Wirft:
-        OSError: Wenn der Port bereits belegt ist oder Bind fehlschlaegt.
+        OSError: Wenn der Port bereits belegt ist oder Bind fehlschlägt.
     """
     srv_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # IPv4 TCP-Socket
 
-    # Sofortigen Neustart ohne TIME_WAIT-Wartezeit ermoeglichen
+    # Sofortigen Neustart ohne TIME_WAIT-Wartezeit ermöglichen
     srv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     # An Adresse und Port binden
     srv_socket.bind((konfig.BIND_ADRESSE, konfig.PORT))
 
-    # Lausch-Warteschlange aktivieren (max. 1 Verbindung fuer P2P)
+    # Lausch-Warteschlange aktivieren (max. 1 Verbindung für P2P)
     srv_socket.listen(konfig.MAX_VERBINDUNGEN)
 
     logger.info(
@@ -141,13 +141,13 @@ def verbindung_akzeptieren(srv_socket: socket.socket) -> tuple[ssl.SSLSocket, tu
     """Wartet auf eine eingehende Verbindung und schliesst den TLS-Handshake ab.
 
     Blockiert, bis ein Client sich verbindet. Umwickelt den rohen TCP-Socket
-    anschliessend mit dem Server-TLS-Kontext und fuehrt den TLS-Handshake
+    anschliessend mit dem Server-TLS-Kontext und führt den TLS-Handshake
     durch.
 
     Parameter:
         srv_socket: Der lauschende TCP-Server-Socket (von server_erstellen()).
 
-    Rueckgabe:
+    Rückgabe:
         Tupel (tls_socket, adresse) – tls_socket ist verwendungsbereit.
 
     Wirft:
@@ -167,12 +167,12 @@ def verbindung_akzeptieren(srv_socket: socket.socket) -> tuple[ssl.SSLSocket, tu
     # Sende-Timeout setzen, damit blockierende Sends nicht ewig warten
     roh_socket.settimeout(konfig.SENDE_TIMEOUT)
 
-    # TLS-Kontext laden und Handshake durchfuehren
+    # TLS-Kontext laden und Handshake durchführen
     tls_kontext = tls_kontext_server()
     try:
         tls_socket: ssl.SSLSocket = tls_kontext.wrap_socket(
             roh_socket,
-            server_side=True,  # Server-Rolle: praesentiert Zertifikat
+            server_side=True,  # Server-Rolle: präsentiert Zertifikat
         )
     except ssl.SSLError as fehler:
         logger.error("TLS-Handshake fehlgeschlagen (Server): %s", fehler)
@@ -198,13 +198,13 @@ def verbindung_herstellen(
     """Stellt eine TLS-Verbindung zum Server her.
 
     Erstellt einen TCP-Socket, konfiguriert Timeouts,
-    verbindet sich zum Server und fuehrt den TLS-Handshake durch.
+    verbindet sich zum Server und führt den TLS-Handshake durch.
 
     Parameter:
         server_ip: IP-Adresse oder Hostname des Ziel-Servers.
         port:      Ziel-Port (Standard: konfig.PORT = 6769).
 
-    Rueckgabe:
+    Rückgabe:
         Fertig verbundener und handshaked ssl.SSLSocket.
 
     Wirft:
@@ -230,13 +230,13 @@ def verbindung_herstellen(
     # Nach erfolgreichem Connect auf Sende/Empfangs-Timeout umschalten
     roh_socket.settimeout(konfig.SENDE_TIMEOUT)
 
-    # TLS-Kontext laden und Handshake durchfuehren
+    # TLS-Kontext laden und Handshake durchführen
     tls_kontext = tls_kontext_client()
     try:
         tls_socket: ssl.SSLSocket = tls_kontext.wrap_socket(
             roh_socket,
-            server_side=False,  # Client-Rolle: prueft Zertifikat des Servers
-            server_hostname=None,  # Kein SNI noetig (Self-Signed, check_hostname=False)
+            server_side=False,  # Client-Rolle: prüft Zertifikat des Servers
+            server_hostname=None,  # Kein SNI nötig (Self-Signed, check_hostname=False)
         )
     except ssl.SSLError as fehler:
         logger.error("TLS-Handshake fehlgeschlagen (Client): %s", fehler)
@@ -257,17 +257,17 @@ def verbindung_herstellen(
 # ---------------------------------------------------------------------------
 
 def daten_senden(verbindung: ssl.SSLSocket, daten: bytes) -> None:
-    """Sendet Bytes-Daten ueber die TLS-Verbindung.
+    """Sendet Bytes-Daten über die TLS-Verbindung.
 
     Parameter:
         verbindung: Die aktive TLS-Socket-Verbindung.
         daten:      Die zu sendenden Nutzdaten als Bytes.
 
     Wirft:
-        OSError:      Bei Netzwerkfehlern waehrend des Sendens.
+        OSError:      Bei Netzwerkfehlern während des Sendens.
         ssl.SSLError: Bei TLS-Fehlern.
     """
-    laenge = len(daten)  # Laenge der Nutzdaten fuer das Logging
+    laenge = len(daten)  # Länge der Nutzdaten für das Logging
 
     try:
         verbindung.sendall(daten)  # Alle Bytes atomar senden
@@ -283,14 +283,14 @@ def daten_senden(verbindung: ssl.SSLSocket, daten: bytes) -> None:
 # ---------------------------------------------------------------------------
 
 def daten_empfangen(verbindung: ssl.SSLSocket) -> bytes:
-    """Empfaengt ein Datenpaket von der TLS-Verbindung.
+    """Empfängt ein Datenpaket von der TLS-Verbindung.
 
     Liest bis zu PUFFER_GROESSE Bytes vom TLS-Socket.
 
     Parameter:
         verbindung: Die aktive TLS-Socket-Verbindung.
 
-    Rueckgabe:
+    Rückgabe:
         Die empfangenen Nutzdaten als Bytes.
 
     Wirft:

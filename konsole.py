@@ -1,10 +1,10 @@
 """
 konsole.py – Server- und Client-Modus (Konsolenbetrieb)
 
-Beschreibung: Enthaelt die Startfunktionen fuer den interaktiven Konsolenbetrieb.
+Beschreibung: Enthält die Startfunktionen für den interaktiven Konsolenbetrieb.
               Server-Modus lauscht dauerhaft auf neue Verbindungen; Client-Modus
               verbindet sich einmalig mit dem angegebenen Ziel. Beide nutzen
-              cli_ui.py fuer die Terminal-Ausgabe.
+              cli_ui.py für die Terminal-Ausgabe.
 
 Autor:        Gruppe 2
 Datum:        2026-03-26
@@ -28,16 +28,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _empfangs_schleife(sitzung: Sitzung, trenn_ereignis: threading.Event, herkunft: str) -> None:
-    """Empfaengt Nachrichten in einem Hintergrund-Thread.
+    """Empfängt Nachrichten in einem Hintergrund-Thread.
 
-    Laeuft solange die Sitzung aktiv ist. Bei Verbindungsabbruch (Gegenseite
+    Läuft solange die Sitzung aktiv ist. Bei Verbindungsabbruch (Gegenseite
     schliesst Socket) setzt nachricht_empfangen den Zustand auf GETRENNT,
-    woraufhin diese Schleife endet und das Trenn-Ereignis ausloest.
+    woraufhin diese Schleife endet und das Trenn-Ereignis auslöst.
 
     Parameter:
         sitzung:        Aktive Sitzung
         trenn_ereignis: Wird gesetzt, wenn die Verbindung enden soll
-        herkunft:       Bezeichnung der Gegenseite fuer Meldungen (z.B. "Client")
+        herkunft:       Bezeichnung der Gegenseite für Meldungen (z.B. "Client")
     """
     while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
         nachricht = sitzung.nachricht_empfangen()
@@ -64,11 +64,11 @@ def server_starten(port: int, name: str) -> None:
     """Startet die Anwendung im Server-Modus.
 
     Lauscht dauerhaft auf neue Verbindungen. Nach einem Verbindungsabbau
-    wartet der Server sofort auf den naechsten Client.
+    wartet der Server sofort auf den nächsten Client.
 
     Parameter:
         port: TCP-Port auf dem gelauscht wird
-        name: Anzeigename fuer Log-Ausgaben und Nachrichten
+        name: Anzeigename für Log-Ausgaben und Nachrichten
     """
     cli_ui.banner_anzeigen()
     print()
@@ -79,7 +79,7 @@ def server_starten(port: int, name: str) -> None:
         srv_socket = server_erstellen()
     except OSError as fehler:
         logger.error("Server-Socket konnte nicht erstellt werden: %s", fehler)
-        cli_ui.info_zeile(f"Port {port} kann nicht gebunden werden. Laeuft bereits ein Server?")
+        cli_ui.info_zeile(f"Port {port} kann nicht gebunden werden. Läuft bereits ein Server?")
         sys.exit(1)
 
     logger.info("Warte auf Verbindungen auf Port %d ...", port)
@@ -147,7 +147,7 @@ def server_starten(port: int, name: str) -> None:
                     quit_durch_nutzer = True
                     break
                 if not sitzung.nachricht_senden(eingabe):
-                    cli_ui.info_zeile("Nachricht nicht uebertragen – Verbindung getrennt")
+                    cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
                     break
 
             trenn_ereignis.set()
@@ -162,7 +162,7 @@ def server_starten(port: int, name: str) -> None:
                 cli_ui.trennlinie()
                 sys.exit(0)
 
-            cli_ui.info_zeile("Verbindung beendet · Warte auf naechsten Client")
+            cli_ui.info_zeile("Verbindung beendet · Warte auf nächsten Client")
             cli_ui.trennlinie()
             print()
 
@@ -180,13 +180,13 @@ def server_starten(port: int, name: str) -> None:
 def client_starten(ziel: str, port: int, name: str) -> None:
     """Startet die Anwendung im Client-Modus.
 
-    Verbindet sich einmalig mit dem angegebenen Ziel. Schlaegt der Aufbau fehl,
+    Verbindet sich einmalig mit dem angegebenen Ziel. Schlägt der Aufbau fehl,
     wird das Programm beendet.
 
     Parameter:
         ziel: IP-Adresse oder Hostname des Servers
         port: TCP-Port des Servers
-        name: Anzeigename fuer Nachricht-Payloads
+        name: Anzeigename für Nachricht-Payloads
     """
     cli_ui.banner_anzeigen()
     print()
@@ -199,7 +199,7 @@ def client_starten(ziel: str, port: int, name: str) -> None:
         logger.info("Verbindung zu %s:%d hergestellt", ziel, port)
     except Exception as fehler:
         logger.error("Verbindungsaufbau zu %s:%d fehlgeschlagen: %s", ziel, port, fehler)
-        cli_ui.info_zeile(f"Verbindung zu {ziel}:{port} nicht moeglich")
+        cli_ui.info_zeile(f"Verbindung zu {ziel}:{port} nicht möglich")
         return
 
     # Sitzung direkt im Zustand VERBUNDEN – TCP+TLS haben den Aufbau abgeschlossen
@@ -235,7 +235,7 @@ def client_starten(ziel: str, port: int, name: str) -> None:
             break
         if not sitzung.nachricht_senden(eingabe):
             logger.error("Nachricht konnte nicht gesendet werden – Verbindung verloren")
-            cli_ui.info_zeile("Nachricht nicht uebertragen – Verbindung getrennt")
+            cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
             break
 
     trenn_ereignis.set()

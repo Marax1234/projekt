@@ -3,7 +3,7 @@ sitzung.py – Sitzungsmanagement
 
 Beschreibung: Verwaltet den Lebenszyklus einer P2P-Chat-Sitzung.
               TCP garantiert Zustellung und Reihenfolge; TLS garantiert
-              Vertraulichkeit und Integritaet auf Transportschicht.
+              Vertraulichkeit und Integrität auf Transportschicht.
               Die Sitzung startet direkt im Zustand VERBUNDEN und wechselt
               auf GETRENNT wenn der Socket geschlossen wird.
 Autor:        Gruppe 2
@@ -30,26 +30,26 @@ from enum import Enum
 import konfig
 from netzwerk import daten_empfangen, daten_senden
 
-# Modul-Logger fuer alle Sitzungs-Ereignisse
+# Modul-Logger für alle Sitzungs-Ereignisse
 logger = logging.getLogger(__name__)
 
 
 class SitzungsZustand(Enum):
-    """Zustaende des Sitzungs-Automaten."""
+    """Zustände des Sitzungs-Automaten."""
 
     GETRENNT: str  = "GETRENNT"   # Keine aktive Verbindung
-    VERBUNDEN: str = "VERBUNDEN"  # Sitzung aktiv, Datenaustausch moeglich
+    VERBUNDEN: str = "VERBUNDEN"  # Sitzung aktiv, Datenaustausch möglich
 
 
 class Sitzung:
-    """Verwaltet eine P2P-Chat-Sitzung ueber eine bestehende TLS-Verbindung.
+    """Verwaltet eine P2P-Chat-Sitzung über eine bestehende TLS-Verbindung.
 
     TCP garantiert Zustellung und Reihenfolge; TLS garantiert Vertraulichkeit
-    und Integritaet auf Transportschicht.
+    und Integrität auf Transportschicht.
 
     Attribute:
         verbindung:    Die aktive TLS-Socket-Verbindung (von netzwerk.py)
-        absender_name: Anzeigename dieses Peers (fuer JSON-Payload)
+        absender_name: Anzeigename dieses Peers (für JSON-Payload)
         server_modus:  True = Server-Seite; False = Client-Seite
         zustand:       Aktueller Zustand (VERBUNDEN oder GETRENNT)
     """
@@ -81,12 +81,12 @@ class Sitzung:
     # ---------------------------------------------------------------------------
 
     def _zustand_setzen(self, neuer_zustand: SitzungsZustand) -> None:
-        """Setzt den Sitzungszustand und protokolliert den Uebergang.
+        """Setzt den Sitzungszustand und protokolliert den Übergang.
 
         Parameter:
             neuer_zustand: Der neue Zielzustand
         """
-        alter_zustand = self.zustand  # Alter Zustand fuer Log-Ausgabe merken
+        alter_zustand = self.zustand  # Alter Zustand für Log-Ausgabe merken
         self.zustand = neuer_zustand
         logger.info(
             "Zustand: %s -> %s",
@@ -99,22 +99,22 @@ class Sitzung:
     # ---------------------------------------------------------------------------
 
     def nachricht_senden(self, nachricht_text: str) -> bool:
-        """Sendet eine Nachricht als JSON-Bytes direkt ueber den TLS-Socket.
+        """Sendet eine Nachricht als JSON-Bytes direkt über den TLS-Socket.
 
-        Schlaegt `sendall()` fehl, ist die Verbindung ohnehin unterbrochen –
-        der Fehler wird als False zurueckgegeben.
+        Schlägt `sendall()` fehl, ist die Verbindung ohnehin unterbrochen –
+        der Fehler wird als False zurückgegeben.
 
-        Payload-Format: JSON mit den Schluesseln "nachricht", "zeitstempel", "absender".
+        Payload-Format: JSON mit den Schlüsseln "nachricht", "zeitstempel", "absender".
 
         Parameter:
             nachricht_text: Der zu sendende Nachrichtentext (UTF-8)
 
-        Rueckgabe:
+        Rückgabe:
             True bei erfolgreichem Senden, False bei Fehler
         """
         if self.zustand != SitzungsZustand.VERBUNDEN:
             logger.error(
-                "Senden nicht moeglich: Zustand ist %s (erwartet VERBUNDEN)",
+                "Senden nicht möglich: Zustand ist %s (erwartet VERBUNDEN)",
                 self.zustand.value,
             )
             return False
@@ -156,7 +156,7 @@ class Sitzung:
     def _socket_schliessen(self) -> None:
         """Schliesst TLS- und TCP-Socket sauber.
 
-        Ignoriert Fehler beim Schliessen (Socket koennte bereits geschlossen sein).
+        Ignoriert Fehler beim Schliessen (Socket könnte bereits geschlossen sein).
         """
         try:
             self.verbindung.shutdown(socket.SHUT_RDWR)  # Graceful TLS-Shutdown
@@ -168,23 +168,23 @@ class Sitzung:
         except OSError as fehler:
             logger.debug("Socket-Schliessen ignoriert (bereits geschlossen): %s", fehler)
 
-        logger.info("Verbindung vollstaendig geschlossen")
+        logger.info("Verbindung vollständig geschlossen")
 
     # ---------------------------------------------------------------------------
     # Nachricht empfangen
     # ---------------------------------------------------------------------------
 
     def nachricht_empfangen(self) -> dict | None:
-        """Empfaengt JSON-Bytes direkt vom TLS-Socket und gibt den Payload-Dict zurueck.
+        """Empfängt JSON-Bytes direkt vom TLS-Socket und gibt den Payload-Dict zurück.
 
         Bei einem Verbindungsabbruch (ConnectionError) wird der Zustand
         automatisch auf GETRENNT gesetzt, damit die Empfangsschleife endet.
-        EMPFANG_TIMEOUT wird gesetzt, da der Nutzer Zeit zum Tippen benoetigt.
+        EMPFANG_TIMEOUT wird gesetzt, da der Nutzer Zeit zum Tippen benötigt.
 
-        Rueckgabe:
+        Rückgabe:
             Payload-Dict bei empfangener Nachricht, None bei Fehler oder Timeout
         """
-        # Laengeren Timeout setzen: Nutzer benoetigt Zeit zum Tippen
+        # Längeren Timeout setzen: Nutzer benötigt Zeit zum Tippen
         self.verbindung.settimeout(konfig.EMPFANG_TIMEOUT)
 
         try:
@@ -209,9 +209,9 @@ class Sitzung:
         try:
             payload_dict: dict = json.loads(rohdaten.decode("utf-8"))  # JSON dekodieren
         except (json.JSONDecodeError, UnicodeDecodeError) as fehler:
-            logger.error("Ungueltige JSON-Payload: %s", fehler)
+            logger.error("Ungültige JSON-Payload: %s", fehler)
             return None
 
-        nachricht = payload_dict.get("nachricht", "<leer>")  # Nachrichtentext fuer Log
+        nachricht = payload_dict.get("nachricht", "<leer>")  # Nachrichtentext für Log
         logger.info("Nachricht empfangen: \"%s\"", nachricht)
         return payload_dict

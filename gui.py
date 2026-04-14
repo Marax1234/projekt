@@ -1,10 +1,10 @@
 """
-gui.py – Tkinter-Oberflaeche
+gui.py – Tkinter-Oberfläche
 
-Beschreibung: Grafische Benutzeroberflaeche fuer den P2P-Chat. Zeigt Nachrichtenverlauf,
-              Eingabefeld und Statusleiste. Kommuniziert ueber queue.Queue mit dem
+Beschreibung: Grafische Benutzeroberflaeche für den P2P-Chat. Zeigt Nachrichtenverlauf,
+              Eingabefeld und Statusleiste. Kommuniziert über queue.Queue mit dem
               Empfangs-Thread (thread-sicheres GUI-Update via root.after()).
-              Sprint 5: Vollstaendige GUI mit VerbindungsDialog, ChatApp und
+              Sprint 5: Vollständige GUI mit VerbindungsDialog, ChatApp und
               thread-sicherem 3-Thread-Modell (GUI, Verbindung, Empfang).
 Autor:        Gruppe 2
 Datum:        2026-03-24
@@ -25,7 +25,7 @@ import konfig
 from netzwerk import server_erstellen, verbindung_akzeptieren, verbindung_herstellen
 from sitzung import Sitzung, SitzungsZustand
 
-# Modul-Logger fuer alle GUI-Ereignisse
+# Modul-Logger für alle GUI-Ereignisse
 logger = logging.getLogger(__name__)
 
 
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 FARBEN: dict[str, str] = {
     "hintergrund":  "#1e1e2e",   # Haupt-Hintergrund
     "oberflaeche":  "#313244",   # Karten, Panels, Eingabefelder
-    "primaer":      "#89b4fa",   # Primaerfarbe (Blau)
+    "primaer":      "#89b4fa",   # Primärfarbe (Blau)
     "text":         "#cdd6f4",   # Haupttext
     "subtext":      "#a6adc8",   # Sekundaertext / Zeitstempel
     "rahmen":       "#45475a",   # Rahmen
@@ -57,19 +57,19 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# QueueEreignis – typisiertes Event fuer thread-sichere Kommunikation
+# QueueEreignis – typisiertes Event für thread-sichere Kommunikation
 # ---------------------------------------------------------------------------
 
 @dataclass
 class QueueEreignis:
-    """Typisiertes Ereignis fuer die thread-sichere Queue-Kommunikation.
+    """Typisiertes Ereignis für die thread-sichere Queue-Kommunikation.
 
     Attribute:
         typ:   Ereignistyp ("verbunden" | "getrennt" | "nachricht" | "fehler" | "status")
         daten: Optionale Nutzdaten (dict, str oder None)
     """
 
-    typ: str    # Ereignistyp fuer Verarbeitungs-Dispatch
+    typ: str    # Ereignistyp für Verarbeitungs-Dispatch
     daten: Any = None
 
 
@@ -81,7 +81,7 @@ class VerbindungsDialog:
     """Modaler Dialog zur Konfiguration der Verbindungsparameter.
 
     Fragt Betriebsmodus (Server/Client), IP-Adresse, Port und Namen ab.
-    Blockiert mit wait_window() bis der Nutzer bestaetigt oder abbricht.
+    Blockiert mit wait_window() bis der Nutzer bestätigt oder abbricht.
     """
 
     def __init__(self, eltern: tk.Tk) -> None:
@@ -90,7 +90,7 @@ class VerbindungsDialog:
         Parameter:
             eltern: Elternfenster (Hauptfenster der Anwendung)
         """
-        self._ergebnis: dict | None = None  # Wird bei Bestaetigung befuellt
+        self._ergebnis: dict | None = None  # Wird bei Bestätigung befuellt
 
         # Toplevel-Dialog erstellen
         self._dialog = tk.Toplevel(eltern)
@@ -111,7 +111,7 @@ class VerbindungsDialog:
         y = (sh - hoehe) // 2
         self._dialog.geometry(f"{breite}x{hoehe}+{x}+{y}")
 
-        # ttk-Styles fuer Dialog konfigurieren
+        # ttk-Styles für Dialog konfigurieren
         self._style = ttk.Style(self._dialog)
         self._style.theme_use("clam")
         self._dialog_styles_anwenden()
@@ -235,7 +235,7 @@ class VerbindungsDialog:
         try:
             port = int(self._port_feld.get().strip())
             if not (1 <= port <= 65535):
-                raise ValueError("Port ausserhalb des gueltigen Bereichs (1–65535)")
+                raise ValueError("Port ausserhalb des gültigen Bereichs (1–65535)")
         except ValueError as fehler:
             messagebox.showerror("Eingabefehler", str(fehler), parent=self._dialog)
             self._port_feld.focus_set()
@@ -264,16 +264,16 @@ class VerbindungsDialog:
         self._dialog.destroy()
 
     def _abbrechen(self) -> None:
-        """Schliesst den Dialog ohne Rueckgabewert."""
+        """Schliesst den Dialog ohne Rückgabewert."""
         self._ergebnis = None
         self._dialog.destroy()
 
     def ergebnis_holen(self) -> dict | None:
-        """Wartet auf Benutzerinteraktion und gibt das Ergebnis zurueck.
+        """Wartet auf Benutzerinteraktion und gibt das Ergebnis zurück.
 
         Blockiert bis der Dialog geschlossen wird (modal via wait_window).
 
-        Rueckgabe:
+        Rückgabe:
             dict mit 'modus', 'ip', 'port', 'name' oder None bei Abbruch
         """
         self._dialog.wait_window()
@@ -285,7 +285,7 @@ class VerbindungsDialog:
 # ---------------------------------------------------------------------------
 
 class ChatApp(tk.Tk):
-    """Haupt-Chat-Fenster mit vollstaendigem Verbindungsmanagement.
+    """Haupt-Chat-Fenster mit vollständigem Verbindungsmanagement.
 
     Verwaltet:
         - GUI-Layout: Statusleiste, Nachrichtenbereich, Eingabebereich (Task 5.1)
@@ -307,7 +307,7 @@ class ChatApp(tk.Tk):
         self._srv_socket = None                        # Server-Listen-Socket
         self._gui_queue: queue.Queue = queue.Queue()   # Thread-sichere Ereignisqueue
         self._verbindungs_params: dict | None = None   # Parameter aus Dialog
-        self._queue_aktiv: bool = False                # Laeuft Queue-Polling?
+        self._queue_aktiv: bool = False                # Läuft Queue-Polling?
         self._schliessen_laeuft: bool = False          # Verhindert doppeltes Schliessen
 
         # Fenster-Konfiguration
@@ -344,7 +344,7 @@ class ChatApp(tk.Tk):
     def _styles_anwenden(self) -> None:
         """Konfiguriert alle ttk-Styles mit Dark-Mode-Farbpalette.
 
-        Verwendet clam als Basis (beste Unterstuetzung fuer Custom Styling).
+        Verwendet clam als Basis (beste Unterstützung für Custom Styling).
         """
         self._style = ttk.Style(self)
         self._style.theme_use("clam")
@@ -406,7 +406,7 @@ class ChatApp(tk.Tk):
         s.configure("TSeparator", background=FARBEN["rahmen"])
 
     def _ui_erstellen(self) -> None:
-        """Erstellt das vollstaendige Fenster-Layout mit grid()-Manager.
+        """Erstellt das vollständige Fenster-Layout mit grid()-Manager.
 
         Layoutstruktur:
             Zeile 0: Statusleiste   (feste Hoehe, Style=Status.TFrame)
@@ -447,7 +447,7 @@ class ChatApp(tk.Tk):
         msg_container.grid_rowconfigure(0, weight=1)
         msg_container.grid_columnconfigure(0, weight=1)
 
-        # tk.Text (nicht ttk): noetig fuer farbige Text-Tags
+        # tk.Text (nicht ttk): nötig für farbige Text-Tags
         self._nachrichten_text = tk.Text(
             msg_container,
             state="disabled",            # Kein direktes Editieren
@@ -474,7 +474,7 @@ class ChatApp(tk.Tk):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self._nachrichten_text.configure(yscrollcommand=scrollbar.set)
 
-        # Text-Tags fuer farbige Formatierung
+        # Text-Tags für farbige Formatierung
         self._nachrichten_text.tag_configure(
             "zeitstempel",
             foreground=FARBEN["subtext"],
@@ -550,7 +550,7 @@ class ChatApp(tk.Tk):
         """Startet den Verbindungsaufbau in einem Hintergrund-Thread.
 
         Parameter:
-            params: dict mit Schluesseln 'modus', 'ip', 'port', 'name'
+            params: dict mit Schlüsseln 'modus', 'ip', 'port', 'name'
         """
         modus_text = "Server – warte auf Client" if params["modus"] == "server" \
             else f"Client – verbinde mit {params['ip']}"
@@ -573,7 +573,7 @@ class ChatApp(tk.Tk):
     def _verbindung_aufbauen_thread(self, params: dict) -> None:
         """Baut TLS-Verbindung im Hintergrund auf.
 
-        Nach erfolgreichem Aufbau wird direkt in die Empfangsschleife uebergegangen.
+        Nach erfolgreichem Aufbau wird direkt in die Empfangsschleife übergegangen.
         Alle Ergebnisse werden via QueueEreignis an den GUI-Thread gemeldet.
 
         Parameter:
@@ -649,15 +649,15 @@ class ChatApp(tk.Tk):
                 nachricht = sitzung.nachricht_empfangen()
 
                 if nachricht is None:
-                    # None zurueck: Timeout (Verbindung noch aktiv) oder Verbindungsabbruch
+                    # None zurück: Timeout (Verbindung noch aktiv) oder Verbindungsabbruch
                     if sitzung.zustand != SitzungsZustand.VERBUNDEN:
                         # Sitzung wurde durch Verbindungsabbruch oder Fehler getrennt
                         self._gui_queue.put(QueueEreignis("getrennt", None))
                         return
-                    # Timeout: normal, weiter auf naechste Nachricht warten
+                    # Timeout: normal, weiter auf nächste Nachricht warten
                     continue
 
-                # Gueltige Nachricht empfangen → an GUI melden
+                # Gültige Nachricht empfangen → an GUI melden
                 self._gui_queue.put(QueueEreignis("nachricht", nachricht))
 
             except Exception as fehler:
@@ -675,7 +675,7 @@ class ChatApp(tk.Tk):
     # -----------------------------------------------------------------------
 
     def _queue_verarbeiten(self) -> None:
-        """Verarbeitet alle Events aus der GUI-Queue (laeuft im Haupt-Thread).
+        """Verarbeitet alle Events aus der GUI-Queue (läuft im Haupt-Thread).
 
         Wird periodisch via root.after() aufgerufen. Verarbeitet max. 20 Events
         pro Aufruf, um die GUI reaktiv zu halten. Re-scheduled sich selbst solange
@@ -689,7 +689,7 @@ class ChatApp(tk.Tk):
                     break
                 self._ereignis_verarbeiten(ereignis)
         finally:
-            # Naechsten Poll einplanen
+            # Nächsten Poll einplanen
             if self._queue_aktiv:
                 self.after(konfig.GUI_QUEUE_INTERVALL, self._queue_verarbeiten)
 
@@ -702,7 +702,7 @@ class ChatApp(tk.Tk):
         match ereignis.typ:
 
             case "status":
-                # Statustext waehrend Verbindungsaufbau aktualisieren
+                # Statustext während Verbindungsaufbau aktualisieren
                 self._status_setzen(ereignis.daten, "verbindend")
 
             case "verbunden":
@@ -768,7 +768,7 @@ class ChatApp(tk.Tk):
         """
         name_tag = "eigener_name" if eigen else "peer_name"
 
-        # Text-Widget kurz schreibbar machen, dann zurueck auf readonly
+        # Text-Widget kurz schreibbar machen, dann zurück auf readonly
         self._nachrichten_text.configure(state="normal")
         self._nachrichten_text.insert("end", f"[{zeitstempel}] ", "zeitstempel")
         self._nachrichten_text.insert("end", f"{absender}: ", name_tag)
@@ -781,7 +781,7 @@ class ChatApp(tk.Tk):
     def _systemnachricht_anzeigen(self, text: str) -> None:
         """Zeigt eine kursive Systemmeldung im Nachrichtenbereich an.
 
-        Wird fuer Verbindungsereignisse (verbunden, getrennt, Fehler) verwendet.
+        Wird für Verbindungsereignisse (verbunden, getrennt, Fehler) verwendet.
 
         Parameter:
             text: Anzuzeigender Systemtext
@@ -802,7 +802,7 @@ class ChatApp(tk.Tk):
         """Sendet die eingegebene Nachricht und zeigt sie sofort lokal an.
 
         Liest Eingabefeld, zeigt eigene Nachricht direkt an, leert das Feld
-        und uebergibt den Text an einen Hintergrund-Thread fuer die Uebertragung.
+        und übergibt den Text an einen Hintergrund-Thread für die Übertragung.
         """
         if self._sitzung is None or self._sitzung.zustand != SitzungsZustand.VERBUNDEN:
             return
@@ -831,7 +831,7 @@ class ChatApp(tk.Tk):
         thread.start()
 
     def _nachricht_senden_thread(self, text: str) -> None:
-        """Sendet eine Nachricht ueber die Sitzung (laeuft im Hintergrund-Thread).
+        """Sendet eine Nachricht über die Sitzung (läuft im Hintergrund-Thread).
 
         Parameter:
             text: Zu sendender Nachrichtentext
@@ -842,7 +842,7 @@ class ChatApp(tk.Tk):
             erfolg = self._sitzung.nachricht_senden(text)
             if not erfolg:
                 self._gui_queue.put(QueueEreignis(
-                    "fehler", "Nachricht konnte nicht uebertragen werden."
+                    "fehler", "Nachricht konnte nicht übertragen werden."
                 ))
         except Exception as fehler:
             self._gui_queue.put(QueueEreignis("fehler", f"Sendefehler: {fehler}"))
@@ -874,7 +874,7 @@ class ChatApp(tk.Tk):
         """WM_DELETE_WINDOW-Handler: Verbindung schliessen, Threads beenden, Fenster schliessen.
 
         Ablauf:
-            1. Doppelaufruf verhindern (_schliessen_laeuft-Flag)
+            1. Doppelaufruf verhindern (_schliessen_läuft-Flag)
             2. Eingabe sofort deaktivieren
             3. Queue-Polling stoppen
             4. Verbindungsabbau im Hintergrund (sitzung.verbindungsabbau())

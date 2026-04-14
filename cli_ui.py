@@ -1,8 +1,8 @@
 """
 cli_ui.py – Terminal-UI-Hilfsfunktionen
 
-Beschreibung: Box-Drawing-Chars fuer die laufende CLI-Oberflaeche sowie
-              figlet via subprocess fuer den Startup-Banner. Keine externen
+Beschreibung: Box-Drawing-Chars für die laufende CLI-Oberfläche sowie
+              figlet via subprocess für den Startup-Banner. Keine externen
               Python-Pakete erforderlich – nur die stdlib.
 
 Autor:        Gruppe 2
@@ -47,7 +47,7 @@ _SEP     = "╌"   # weiche Trennlinie (Info-Zeilen)
 # ---------------------------------------------------------------------------
 
 def _term_breite() -> int:
-    """Gibt die aktuelle Terminal-Breite zurueck (Fallback: 80)."""
+    """Gibt die aktuelle Terminal-Breite zurück (Fallback: 80)."""
     return shutil.get_terminal_size((80, 24)).columns
 
 
@@ -58,8 +58,8 @@ def _term_breite() -> int:
 def banner_anzeigen() -> None:
     """Zeigt den Startup-Banner an.
 
-    Versucht zuerst ``figlet`` ueber subprocess. Ist figlet nicht installiert
-    oder schlaegt es fehl, wird eine hardcoded doppelte Box-Zeichnung genutzt.
+    Versucht zuerst ``figlet`` über subprocess. Ist figlet nicht installiert
+    oder schlägt es fehl, wird eine hardcoded doppelte Box-Zeichnung genutzt.
     """
     breite = _term_breite()
     try:
@@ -152,10 +152,10 @@ def eingabe_prompt(trenn_ereignis=None) -> str | None:
     """Liest eine Zeile vom Nutzer (mit ``>``-Prompt).
 
     Parameter:
-        trenn_ereignis: Optionales threading.Event – gibt None zurueck wenn es
-                        gesetzt wird bevor der Nutzer Enter drueckt.
+        trenn_ereignis: Optionales threading.Event – gibt None zurück wenn es
+                        gesetzt wird bevor der Nutzer Enter drückt.
 
-    Rueckgabe:
+    Rückgabe:
         Eingabe-String oder None wenn die Verbindung von der Gegenseite getrennt wurde.
     """
     print("> ", end="", flush=True)
