@@ -1,9 +1,10 @@
 """
-netzwerk.py – TCP/TLS-Verbindung, Senden, Empfangen (asyncio)
+netzwerk.py – TCP/mTLS-Verbindung, Senden, Empfangen (asyncio)
 
-Beschreibung: Verwaltet TLS-Verbindungen über asyncio-Streams.
-              Stellt Funktionen für Verbindungsaufbau (Client + Race-to-Connect),
-              Daten senden und empfangen bereit.
+Beschreibung: Verwaltet mTLS-Verbindungen über asyncio-Streams.
+              Beide Seiten authentifizieren sich gegenseitig mit CA-signierten
+              Zertifikaten (CERT_REQUIRED). Stellt Funktionen für Verbindungsaufbau
+              (Client + Race-to-Connect), Daten senden und empfangen bereit.
 Autor:        Gruppe 2
 Datum:        2026-03-24
 Modul:        Network Security 2026
@@ -11,7 +12,7 @@ Modul:        Network Security 2026
 Testschritte – Race-to-Connect (2 Terminals, gleichzeitig starten):
     Terminal 1 (VM1, IP z.B. 192.168.56.101):
         python3 -c "
-        import asyncio
+        import sys, asyncio; sys.path.insert(0, 'src')
         from netzwerk import auto_verbinden
         async def t():
             r, w, s = await auto_verbinden('192.168.56.102')
@@ -21,7 +22,7 @@ Testschritte – Race-to-Connect (2 Terminals, gleichzeitig starten):
 
     Terminal 2 (VM2, IP z.B. 192.168.56.102):
         python3 -c "
-        import asyncio
+        import sys, asyncio; sys.path.insert(0, 'src')
         from netzwerk import auto_verbinden
         async def t():
             r, w, s = await auto_verbinden('192.168.56.101')

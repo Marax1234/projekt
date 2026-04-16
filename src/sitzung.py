@@ -2,20 +2,20 @@
 sitzung.py – Sitzungsmanagement
 
 Beschreibung: Verwaltet den Lebenszyklus einer P2P-Chat-Sitzung.
-              TCP garantiert Zustellung und Reihenfolge; TLS garantiert
-              Vertraulichkeit und Integrität auf Transportschicht.
-              Die Sitzung startet direkt im Zustand VERBUNDEN und wechselt
-              auf GETRENNT wenn der Stream geschlossen wird.
+              TCP garantiert Zustellung und Reihenfolge; mTLS garantiert
+              Vertraulichkeit, Integrität und gegenseitige Authentifizierung
+              auf Transportschicht. Die Sitzung startet direkt im Zustand
+              VERBUNDEN und wechselt auf GETRENNT wenn der Stream geschlossen wird.
 Autor:        Gruppe 2
 Datum:        2026-03-24
 Modul:        Network Security 2026
 
 Testschritte (2 Terminals):
     Terminal 1 (Server):
-        python3 hauptprogramm.py --modus server --port 6769
+        python3 src/hauptprogramm.py --modus server --port 6769
 
     Terminal 2 (Client):
-        python3 hauptprogramm.py --modus client --ziel 127.0.0.1 --port 6769
+        python3 src/hauptprogramm.py --modus client --ziel 127.0.0.1 --port 6769
         > Hallo Welt
         > quit
 """

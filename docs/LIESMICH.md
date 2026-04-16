@@ -14,38 +14,54 @@
 
 ---
 
-## Zertifikate generieren (einmalig, auf jeder VM)
+## Zertifikate generieren (einmalig pro Laboraufbau)
 
-Das Skript erstellt eine lokale CA sowie ein davon signiertes Peer-Zertifikat.
-Beide VMs müssen anschließend das `ca_zertifikat.pem` des jeweils anderen Peers besitzen.
+Beide Peers verwenden eine **gemeinsame CA**. Peer A generiert sie,
+Peer B signiert sein eigenes Zertifikat damit.
+
+### Schritt 1 – Peer A: CA + eigenes Zertifikat generieren
 
 ```bash
-# Aus dem Projektverzeichnis ausführen:
 bash certs/zertifikate_erstellen.sh
 ```
 
-Danach `certs/ca_zertifikat.pem` gegenseitig übertragen:
+Danach CA-Dateien für Peer B bereitstellen:
 
 ```bash
-# Von VM1 → VM2:
-scp certs/ca_zertifikat.pem user@192.168.100.2:~/projekt/certs/ca_zertifikat.pem
-
-# Von VM2 → VM1:
-scp certs/ca_zertifikat.pem user@192.168.100.1:~/projekt/certs/ca_zertifikat.pem
+cd certs && python3 -m http.server 8080
+# Läuft bis Schritt 3 abgeschlossen ist, dann Strg+C
 ```
 
-**Hinweis:** Wenn beide VMs dieselbe CA verwenden sollen (z. B. Laborumgebung),
-reicht es, das Skript einmal auszuführen und `certs/ca_zertifikat.pem` + `certs/ca_schluessel.pem`
-auf die andere VM zu kopieren. Dort dann nur Schritte 3–4 des Skripts ausführen
-(Peer-Schlüssel + Peer-Zertifikat generieren).
+Das Skript gibt am Ende automatisch die fertigen `wget`-Befehle mit der eigenen IP aus.
 
-Zertifikat pruefen:
+### Schritt 2 – Peer B: CA holen
+
 ```bash
+wget http://<IP_PEER_A>:8080/ca_zertifikat.pem -O certs/ca_zertifikat.pem
+wget http://<IP_PEER_A>:8080/ca_schluessel.pem -O certs/ca_schluessel.pem
+```
+
+### Schritt 3 – Peer B: eigenes Zertifikat signieren
+
+```bash
+bash certs/zertifikate_erstellen.sh --nur-peer-cert
+```
+
+### Schritt 4 – Peer A: HTTP-Server beenden
+
+```bash
+# Strg+C im Terminal von Schritt 1
+```
+
+---
+
+### Zertifikate prüfen
+
+```bash
+# Inhalt anzeigen:
 openssl x509 -in certs/zertifikat.pem -noout -text | grep -E "Subject:|Issuer:|Validity"
-```
 
-CA-Signierung prüfen:
-```bash
+# CA-Signierung prüfen:
 openssl verify -CAfile certs/ca_zertifikat.pem certs/zertifikat.pem
 ```
 
@@ -88,16 +104,16 @@ python3 src/hauptprogramm.py --modus client --ziel <IP_VON_VM1> --port 6769
 
 ---
 
-## Netzwerk pruefen
+## Netzwerk prüfen
 
 ```bash
-# VMs koennen sich gegenseitig erreichen?
+# VMs können sich gegenseitig erreichen?
 ping <IP_VON_VM1>
 
 # Port offen?
 nc -zv <IP_VON_VM1> 6769
 
-# Netzwerkinterfaces pruefen
+# Netzwerkinterfaces prüfen
 ip addr show
 ```
 
@@ -116,8 +132,7 @@ tshark -i eth0 -f "tcp port 6769" -Y "tls.handshake"
 tshark -i eth0 -f "tcp port 6769" -w capture.pcapng
 
 # In Wireshark: Analyze → Expert Information zeigt TLS Cipher Suite
-# Erwartung: TLS 1.3-Handshake sichtbar (Record Version: TLS 1.3), Payload verschluesselt
-# TLS-Version pruefen: tshark -i eth0 -Y "tls.record.version == 0x0304"
+# Erwartung: TLS 1.3-Handshake sichtbar (Record Version: TLS 1.3), Payload verschlüsselt
 ```
 
 ---
@@ -130,30 +145,30 @@ Die Anwendung schreibt alle Ereignisse in `p2pchat.log` (im Projektverzeichnis):
 # Log in Echtzeit verfolgen:
 tail -f p2pchat.log
 
-# Log-Level erhoehen (DEBUG zeigt Nachrichtendetails):
+# Log-Level erhöhen (DEBUG zeigt Nachrichtendetails):
 python3 src/hauptprogramm.py --ziel <IP> --debug
 ```
 
 Log-Phasen:
 - **Verbindungsaufbau:** TCP-Verbindung, mTLS-Handshake, Peer-Zertifikat-Prüfung
-- **Datenuebertragung:** Nachrichten
+- **Datenübertragung:** Nachrichten
 - **Fehler:** Timeout, Verbindungsabbruch, Zertifikat abgelehnt
-- **Verbindungsabbau:** Socket-Schliessen
+- **Verbindungsabbau:** Socket-Schließen
 
 ---
 
-## Protokoll-Uebersicht
+## Protokoll-Übersicht
 
 Jede Nachricht wird als JSON-Objekt mit den Feldern `nachricht`, `zeitstempel`
-und `absender` als UTF-8-codierte Bytes direkt ueber den TLS-Kanal uebertragen.
+und `absender` als UTF-8-codierte Bytes direkt über den TLS-Kanal übertragen.
 
 ```
 | JSON-Payload (n B, UTF-8) |
 ```
 
 **Sicherheit:**
-- **Vertraulichkeit & Integritaet:** TLS 1.3 (AEAD-Verschluesselung) – gesamter Kanal verschlüsselt und integritätsgesichert
-- **TLS-Mindestversion:** TLS 1.3 wird serverseitig und clientseitig erzwungen (`minimum_version = TLSv1_3`). Verbindungsversuche mit TLS 1.2 oder älter werden abgelehnt.
+- **Vertraulichkeit & Integrität:** TLS 1.3 (AEAD) – gesamter Kanal verschlüsselt und integritätsgesichert
+- **TLS-Mindestversion:** TLS 1.3 serverseitig und clientseitig erzwungen; TLS 1.2 wird abgelehnt
 - **Gegenseitige Authentifizierung (mTLS):** Beide Peers präsentieren ein CA-signiertes Zertifikat. Server und Client prüfen das Gegenzertifikat mit `CERT_REQUIRED` gegen die gemeinsame CA. Ein Angreifer ohne gültiges CA-Zertifikat wird beim Handshake abgelehnt.
 
 ---
@@ -177,10 +192,10 @@ projekt/
 │   └── 2026_Aufgabenstellung_Programmentwurf_v1.1.pdf
 ├── certs/                      – Zertifikate (alle .pem in .gitignore)
 │   ├── zertifikate_erstellen.sh – CA + Peer-Zertifikat generieren
-│   ├── ca_zertifikat.pem        – CA-Zertifikat (an Partner übertragen)
-│   ├── zertifikat.pem           – Peer-Zertifikat (lokal)
+│   ├── ca_zertifikat.pem        – Gemeinsame CA (Peer A → Peer B übertragen)
+│   ├── zertifikat.pem           – Eigenes Peer-Zertifikat
 │   ├── schluessel.pem           – Peer-Schlüssel (NICHT verteilen)
-│   └── ca_schluessel.pem        – CA-Schlüssel (NICHT verteilen)
+│   └── ca_schluessel.pem        – CA-Schlüssel (nur während Setup, NICHT verteilen)
 └── .gitignore
 ```
 
@@ -188,9 +203,9 @@ projekt/
 
 ## Fehlerbehebung
 
-| Problem                          | Loesung                                                              |
-|----------------------------------|----------------------------------------------------------------------|
-| `Port already in use`            | `sudo lsof -i :6769` – alten Prozess beenden                         |
+| Problem | Lösung |
+|---|---|
+| `Port already in use` | `sudo lsof -i :6769` – alten Prozess beenden |
 | `SSL: CERTIFICATE_VERIFY_FAILED` | `certs/ca_zertifikat.pem` fehlt oder Peer-Zertifikat nicht von dieser CA signiert |
-| `SSL: NO_CERTIFICATE_RETURNED`   | Gegenseite hat kein Zertifikat gesendet – `bash certs/zertifikate_erstellen.sh` auf beiden VMs |
-| Keine Verbindung nach 15 s       | IP falsch, Port blockiert oder beide im Client-Try                    |
+| `SSL: NO_CERTIFICATE_RETURNED` | Gegenseite hat kein Zertifikat gesendet – `bash certs/zertifikate_erstellen.sh` auf beiden VMs ausführen |
+| Keine Verbindung nach 15 s | IP falsch, Port blockiert oder beide im Client-Try |
