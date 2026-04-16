@@ -207,30 +207,45 @@ async def auto_verbinden(
     server_task = asyncio.create_task(_server_versuch(), name="RaceServer")
     client_task = asyncio.create_task(_client_versuch(), name="RaceClient")
 
-    done, pending = await asyncio.wait(
-        {server_task, client_task},
-        return_when=asyncio.FIRST_COMPLETED,
-        timeout=konfig.RACE_TIMEOUT + 1,
-    )
+    # Warte auf ersten *erfolgreichen* Task – ein fehlgeschlagener Task (z.B.
+    # ECONNREFUSED beim Client) darf den noch-wartenden Server-Task NICHT
+    # abbrechen. Daher wird in einer Schleife weitergewartet solange noch Tasks
+    # laufen und noch kein Gewinner gefunden wurde.
+    remaining: set[asyncio.Task] = {server_task, client_task}
+    winner: asyncio.Task | None = None
 
-    for task in pending:
+    while remaining and winner is None:
+        done, remaining = await asyncio.wait(
+            remaining,
+            return_when=asyncio.FIRST_COMPLETED,
+            timeout=konfig.RACE_TIMEOUT + 1,
+        )
+        if not done:  # Timeout der äußeren Schleife
+            break
+        for task in done:
+            if not task.cancelled() and task.exception() is None:
+                winner = task
+                break
+
+    for task in remaining:
         task.cancel()
         try:
             await task
         except (asyncio.CancelledError, Exception):
             pass
 
-    if not done:
+    if winner is None:
+        last_exc = next(
+            (t.exception() for t in (server_task, client_task)
+             if t.done() and not t.cancelled() and t.exception() is not None),
+            None,
+        )
+        if last_exc:
+            raise ConnectionError(f"Race-to-Connect fehlgeschlagen: {last_exc}")
         raise ConnectionError(
             f"Race-to-Connect: Keine Verbindung zu {ziel_ip}:{port} "
             f"innerhalb von {konfig.RACE_TIMEOUT:.0f} Sekunden."
         )
-
-    # Ersten erfolgreichen Task auswählen (beide könnten done sein)
-    winner = next((t for t in done if not t.exception()), None)
-    if winner is None:
-        exc = next(iter(done)).exception()
-        raise ConnectionError(f"Race-to-Connect fehlgeschlagen: {exc}")
 
     reader, writer = winner.result()
     ist_server = (winner is server_task)
