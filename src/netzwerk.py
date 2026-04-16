@@ -128,6 +128,7 @@ async def verbindung_herstellen(
 
     Rückgabe:
         (reader, writer) – fertig verbundene TLS-Streams.
+        Der StreamReader-Puffer ist auf konfig.MAX_FRAME_BYTES begrenzt.
 
     Wirft:
         ssl.SSLError:        Bei fehlgeschlagenem TLS-Handshake.
@@ -138,7 +139,9 @@ async def verbindung_herstellen(
     logger.info("Verbinde zu %s:%d ...", server_ip, port)
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(server_ip, port, ssl=kontext),
+            asyncio.open_connection(
+                server_ip, port, ssl=kontext, limit=konfig.MAX_FRAME_BYTES
+            ),
             timeout=konfig.VERBINDUNGS_TIMEOUT,
         )
     except (OSError, ssl.SSLError, asyncio.TimeoutError) as fehler:
@@ -203,7 +206,11 @@ async def auto_verbinden(
                 await w.wait_closed()
 
         server = await asyncio.start_server(
-            _handle, host=konfig.BIND_ADRESSE, port=port, ssl=tls_kontext_server(),
+            _handle,
+            host=konfig.BIND_ADRESSE,
+            port=port,
+            ssl=tls_kontext_server(),
+            limit=konfig.MAX_FRAME_BYTES,
         )
         try:
             await asyncio.sleep(konfig.RACE_TIMEOUT)  # hält Server bis Timeout am Leben
@@ -215,7 +222,9 @@ async def auto_verbinden(
         await asyncio.sleep(konfig.RACE_CLIENT_VERZOEGERUNG)
         try:
             r, w = await asyncio.wait_for(
-                asyncio.open_connection(ziel_ip, port, ssl=tls_kontext_client()),
+                asyncio.open_connection(
+                    ziel_ip, port, ssl=tls_kontext_client(), limit=konfig.MAX_FRAME_BYTES
+                ),
                 timeout=konfig.VERBINDUNGS_TIMEOUT,
             )
         except Exception:
@@ -263,6 +272,25 @@ async def auto_verbinden(
 # Protokoll-Framing – NDJSON (newline-delimited JSON)
 # ---------------------------------------------------------------------------
 
+class EmpfangsTimeout(ConnectionError):
+    """Wird ausgelöst wenn innerhalb von EMPFANG_TIMEOUT kein Frame eintrifft.
+
+    Unterklasse von ConnectionError – separat fangbar, damit Empfangs-Timeout
+    von echten Verbindungsfehlern (TCP FIN/RST, SSL-Fehler) unterschieden
+    werden kann.
+    """
+
+
+class FrameZuGross(ConnectionError):
+    """Wird ausgelöst wenn ein empfangener Frame das Größenlimit überschreitet.
+
+    Unterklasse von ConnectionError – separat fangbar, damit Frame-Größen-
+    verletzungen von normalen Verbindungsfehlern und Timeouts unterschieden
+    werden können. Nach diesem Fehler ist der StreamReader in einem inkonsistenten
+    Zustand; die Verbindung muss sofort geschlossen werden.
+    """
+
+
 async def frame_senden(writer: asyncio.StreamWriter, frame: dict) -> None:
     """Serialisiert einen dict als NDJSON-Zeile und sendet ihn über den Stream.
 
@@ -290,20 +318,44 @@ async def frame_senden(writer: asyncio.StreamWriter, frame: dict) -> None:
 async def frame_empfangen(reader: asyncio.StreamReader) -> dict:
     """Liest eine NDJSON-Zeile vom Stream und gibt das deserialisierte dict zurück.
 
+    Verwendet readuntil() statt readline(), damit das über open_connection()
+    gesetzte StreamReader-Limit (MAX_FRAME_BYTES) greift. Ein Frame der das
+    Limit überschreitet, löst FrameZuGross aus – die Verbindung muss danach
+    sofort geschlossen werden, da der Reader-Puffer in einem inkonsistenten
+    Zustand ist.
+
     Parameter:
-        reader: Aktiver asyncio StreamReader.
+        reader: Aktiver asyncio StreamReader (Limit = konfig.MAX_FRAME_BYTES).
 
     Rückgabe:
         Deserialisierter Frame als dict.
 
     Wirft:
-        ConnectionError:   Wenn die Verbindung getrennt wurde (leerer Read).
+        EmpfangsTimeout:     Wenn innerhalb EMPFANG_TIMEOUT kein Frame eintrifft.
+        FrameZuGross:        Wenn der Frame MAX_FRAME_BYTES überschreitet.
+        ConnectionError:     Wenn die Verbindung getrennt wurde (leerer Read).
         json.JSONDecodeError: Bei ungültigem JSON.
-        OSError:           Bei Netzwerkfehlern.
-        ssl.SSLError:      Bei TLS-Fehlern.
+        OSError:             Bei Netzwerkfehlern.
+        ssl.SSLError:        Bei TLS-Fehlern.
     """
     try:
-        rohdaten = await reader.readline()
+        rohdaten = await asyncio.wait_for(
+            reader.readuntil(b"\n"),
+            timeout=konfig.EMPFANG_TIMEOUT,
+        )
+    except asyncio.LimitOverrunError:
+        logger.error(
+            "frame_empfangen: Frame überschreitet Größenlimit von %d Bytes",
+            konfig.MAX_FRAME_BYTES,
+        )
+        raise FrameZuGross(
+            f"Frame zu groß – Limit: {konfig.MAX_FRAME_BYTES} Bytes"
+        )
+    except asyncio.TimeoutError:
+        logger.error("frame_empfangen: Timeout nach %.0fs", konfig.EMPFANG_TIMEOUT)
+        raise EmpfangsTimeout(
+            f"Empfangs-Timeout nach {konfig.EMPFANG_TIMEOUT:.0f} s – kein Frame vom Peer"
+        )
     except (OSError, ssl.SSLError) as fehler:
         logger.error("frame_empfangen fehlgeschlagen: %s", fehler)
         raise
@@ -317,7 +369,7 @@ async def frame_empfangen(reader: asyncio.StreamReader) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Task 2.6 – Daten senden
+# Task 2.6a – Daten senden (Raw-Bytes, Legacy)
 # ---------------------------------------------------------------------------
 
 async def daten_senden(writer: asyncio.StreamWriter, daten: bytes) -> None:
@@ -342,7 +394,7 @@ async def daten_senden(writer: asyncio.StreamWriter, daten: bytes) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task 2.6 – Daten empfangen
+# Task 2.6b – Daten empfangen (Raw-Bytes, Legacy)
 # ---------------------------------------------------------------------------
 
 async def daten_empfangen(reader: asyncio.StreamReader) -> bytes:

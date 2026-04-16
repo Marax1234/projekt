@@ -39,16 +39,20 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 ## 5. Nur IPv4
 
 **Beschreibung:** Das System unterstützt ausschließlich IPv4.  
-**Ursache:** `netzwerk.py:117` und `:214` – `socket.AF_INET` ist fest kodiert.  
+**Ursache:** `konfig.py:17` – `BIND_ADRESSE = "0.0.0.0"` bindet den Server-Socket nur an alle IPv4-Interfaces. `asyncio.start_server` und `asyncio.open_connection` verwenden damit ausschließlich IPv4.  
 **Auswirkung:** Reine IPv6-Umgebungen werden nicht unterstützt.
 
 ---
 
-## 6. Eingeschränkter Wiederverbindungsmechanismus
+## 6. Wiederverbindung begrenzt auf MAX_RECONNECT_VERSUCHE
 
-**Beschreibung:** Nach einem Verbindungsabbruch gibt es keine automatische Wiederverbindung.  
-**Ursache:** `sitzung.py` – bei `ConnectionError` wird der Zustand auf `GETRENNT` gesetzt und die Empfangsschleife beendet. Der Server wartet dank `while True`-Schleife in `konsole.py` auf den nächsten Client — der Client ist jedoch one-shot und beendet sich.  
-**Auswirkung:** Kurze Netzwerkunterbrechungen beenden die Client-Sitzung endgültig; ein Neustart der Anwendung ist erforderlich.
+**Beschreibung:** Client- und Auto-Modus versuchen nach einem Abbruch automatisch
+Reconnect mit exponentiellem Backoff (bis 60 s). Nach `MAX_RECONNECT_VERSUCHE` (= 10)
+erfolglosen Versuchen beendet sich das Programm.  
+**Ursache:** Unendliche Wiederholungen würden eine dauerhaft nicht erreichbare Gegenstelle
+nicht erkennen und CPU/Netz unnötig belasten.  
+**Auswirkung:** Bei mehr als 10 aufeinanderfolgenden Fehlversuchen ist ein manueller
+Neustart erforderlich. Der Server-Modus ist davon nicht betroffen (lauscht unbegrenzt).
 
 ---
 

@@ -136,6 +136,17 @@ def info_zeile(text: str) -> None:
     print(f"{_SEP}{_SEP}{kern}{_SEP * rechts}")
 
 
+def fehler_zeile(text: str) -> None:
+    """Gibt eine auffällige Fehlermeldung aus (z.B. bei dauerhaftem Verbindungsausfall).
+
+    Beispiel:  !! Peer dauerhaft nicht erreichbar. Programm wird beendet. !!
+    """
+    breite = _term_breite()
+    kern   = f" {text} "
+    pad    = max(0, (breite - len(kern) - 4) // 2)
+    print(f"{'!!' + ' ' * pad}{kern}{' ' * pad + '!!'}")
+
+
 def nachricht_ausgeben(absender: str, text: str, zeitstempel: str) -> None:
     """Gibt eine empfangene Nachricht formatiert aus und stellt den Prompt wieder her.
 

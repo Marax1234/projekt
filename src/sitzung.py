@@ -6,11 +6,15 @@ Beschreibung: Vollständige Implementierung des Anwendungsprotokolls über TLS:
               - Nachrichtenschema: msg_type, protocol_version, msg_id, app_session_id, timestamp, data
               - 7-Zustands-Automat: GETRENNT → TLS_AUFGEBAUT → HANDSHAKE_AUSSTEHEND
                                     → BEREIT → VERALTET → SCHLIESSEN → GETRENNT
+              - Vereinfachter externer Zustand: VerbindungsZustand (VERBUNDEN/IDLE/PING_PENDING/
+                GETRENNT/RECONNECTING) – für konsole.py und Tests
               - App-Handshake (APP_HELLO / APP_HELLO_ACK) nach TLS
-              - CHAT + APP_MSG_ACK mit Timeout → STALE/APP_CLOSE
-              - Deduplizierung per app_session_id (OrderedDict, max DEDUP_MAX_IDS)
+              - CHAT + APP_MSG_ACK mit Timeout → VERALTET/APP_CLOSE
+              - Deduplizierung per msg_id (OrderedDict, max DEDUP_MAX_IDS)
               - Heartbeat (APP_PING/APP_PONG) nur bei Idle, nach 2 verpassten APP_PONGs trennen
               - Geordneter Verbindungsabbau (APP_CLOSE) und Fehlerbehandlung (APP_ERROR)
+              - Trenngrund (trenn_grund) für semantisch korrekte UI-Meldungen in konsole.py
+              - _geschlossen-Guard verhindert doppelten Aufruf von _sitzung_schliessen
 Autor:        Gruppe 2
 Datum:        2026-04-16
 Modul:        Network Security 2026
@@ -26,17 +30,17 @@ from datetime import datetime, timezone
 from enum import Enum
 
 import konfig
-from netzwerk import frame_empfangen, frame_senden
+from netzwerk import EmpfangsTimeout, FrameZuGross, frame_empfangen, frame_senden
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Zustandsautomat
+# Zustandsautomaten
 # ---------------------------------------------------------------------------
 
 class SitzungsZustand(Enum):
-    """7-Zustands-Automat der Sitzung."""
+    """7-Zustands-Automat der Sitzung (internes Protokoll-Level)."""
 
     GETRENNT             = "GETRENNT"              # Keine aktive Verbindung
     TCP_VERBUNDEN        = "TCP_VERBUNDEN"          # TCP aufgebaut (nicht genutzt, mTLS direkt)
@@ -45,6 +49,20 @@ class SitzungsZustand(Enum):
     BEREIT               = "BEREIT"                 # Session ready – Chat-Nachrichten erlaubt
     VERALTET             = "VERALTET"               # ACK/Heartbeat-Timeout – Verbindung verdächtig
     SCHLIESSEN           = "SCHLIESSEN"             # Geordneter Abbau läuft
+
+
+class VerbindungsZustand(Enum):
+    """Vereinfachter Verbindungszustand für externe Beobachter (konsole.py, Tests).
+
+    Macht Zustandsübergänge testbar und verhindert String-Vergleiche in der
+    aufrufenden Schicht. Wird von der Heartbeat-Schleife und verbinden() gepflegt.
+    """
+
+    VERBUNDEN    = "VERBUNDEN"     # BEREIT, aktiver Traffic vorhanden
+    IDLE         = "IDLE"          # BEREIT, kein Traffic – wartet auf PING-Auslöser
+    PING_PENDING = "PING_PENDING"  # APP_PING gesendet, wartet auf APP_PONG
+    GETRENNT     = "GETRENNT"      # Verbindung beendet
+    RECONNECTING = "RECONNECTING"  # Wiederverbindung läuft (von konsole.py gesetzt)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +117,16 @@ class Sitzung:
         self._last_activity: float = 0.0
         self._missed_pongs: int = 0
 
+        # Schliessen-Guard: verhindert doppelten Aufruf (Race Condition bei
+        # gleichzeitigem EMPFANG_TIMEOUT + Heartbeat-Timeout)
+        self._geschlossen: bool = False
+
+        # Trenngrund: ermöglicht semantisch korrekte UI-Meldungen in konsole.py
+        self.trenn_grund: str = ""
+
+        # Externer Verbindungszustand (für konsole.py und Tests)
+        self._verbindungs_zustand: VerbindungsZustand = VerbindungsZustand.GETRENNT
+
         # UI-Queue: serialisierter CHAT-Nachrichtenstrom für konsole.py
         self.ui_queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
@@ -120,6 +148,11 @@ class Sitzung:
     def ist_aktiv(self) -> bool:
         """True wenn die Sitzung im Zustand BEREIT ist."""
         return self.zustand == SitzungsZustand.BEREIT
+
+    @property
+    def verbindungs_zustand(self) -> VerbindungsZustand:
+        """Vereinfachter externer Verbindungszustand (VERBUNDEN/IDLE/PING_PENDING/GETRENNT/RECONNECTING)."""
+        return self._verbindungs_zustand
 
     # -------------------------------------------------------------------------
     # Framing (delegiert an netzwerk.py)
@@ -151,8 +184,14 @@ class Sitzung:
     # -------------------------------------------------------------------------
 
     def _validieren(self, frame: dict) -> bool:
-        """Prüft Pflichtfelder und Protokollversion eines empfangenen Frames."""
-        for pflicht in ("msg_type", "protocol_version", "timestamp"):
+        """Prüft Pflichtfelder, Protokollversion und Datentyp eines empfangenen Frames.
+
+        Geprüfte Invarianten:
+        - Pflichtfelder msg_type, protocol_version, timestamp, msg_id vorhanden
+        - protocol_version == konfig.PROTOKOLL_VERSION
+        - Feld 'data', falls vorhanden, ist ein dict (nachfolgende Logik setzt das voraus)
+        """
+        for pflicht in ("msg_type", "protocol_version", "timestamp", "msg_id"):
             if pflicht not in frame:
                 logger.error("Pflichtfeld fehlt: %s (Frame: %s)", pflicht, frame.get("msg_type"))
                 return False
@@ -160,6 +199,12 @@ class Sitzung:
             logger.error(
                 "Inkompatible Protokollversion: %s (erwartet %s)",
                 frame["protocol_version"], konfig.PROTOKOLL_VERSION,
+            )
+            return False
+        if "data" in frame and not isinstance(frame["data"], dict):
+            logger.error(
+                "Feld 'data' ist kein dict (Typ: %s, Frame: %s)",
+                type(frame["data"]).__name__, frame.get("msg_type"),
             )
             return False
         return True
@@ -194,8 +239,9 @@ class Sitzung:
             self._zustand_setzen(SitzungsZustand.GETRENNT)
             raise ConnectionError(f"Handshake fehlgeschlagen: {fehler}") from fehler
 
-        self._last_activity = asyncio.get_event_loop().time()
+        self._last_activity = asyncio.get_running_loop().time()
         self._zustand_setzen(SitzungsZustand.BEREIT)
+        self._verbindungs_zustand = VerbindungsZustand.VERBUNDEN
 
         self._receiver_task = asyncio.create_task(
             self._receiver_loop(), name="ReceiverLoop"
@@ -209,7 +255,10 @@ class Sitzung:
         )
 
     async def _handshake_server(self) -> None:
-        """Server: APP_HELLO senden, auf APP_HELLO_ACK warten."""
+        """Server: APP_HELLO senden, auf APP_HELLO_ACK warten.
+
+        Prüft, ob das APP_HELLO_ACK die korrekte app_session_id zurückspiegelt.
+        """
         self.sitzungs_id = "sess-" + str(uuid.uuid4())[:8]
 
         hello = self._frame(
@@ -227,13 +276,21 @@ class Sitzung:
             raise ConnectionError(
                 f"Erwartetes APP_HELLO_ACK, erhalten: {ack.get('msg_type')}"
             )
+        if ack.get("app_session_id") != self.sitzungs_id:
+            raise ConnectionError(
+                f"app_session_id-Mismatch im APP_HELLO_ACK: "
+                f"erwartet={self.sitzungs_id}, erhalten={ack.get('app_session_id')}"
+            )
         logger.debug(
             "APP_HELLO_ACK empfangen von %s",
             ack.get("data", {}).get("client_name", "?"),
         )
 
     async def _handshake_client(self) -> None:
-        """Client: auf APP_HELLO warten, APP_HELLO_ACK senden."""
+        """Client: auf APP_HELLO warten, APP_HELLO_ACK senden.
+
+        Übernimmt die app_session_id aus APP_HELLO; lehnt leere Session-IDs ab.
+        """
         hello = await asyncio.wait_for(
             self._empfangen(), timeout=konfig.HANDSHAKE_TIMEOUT
         )
@@ -244,6 +301,8 @@ class Sitzung:
             )
 
         self.sitzungs_id = hello.get("app_session_id", "")
+        if not self.sitzungs_id:
+            raise ConnectionError("APP_HELLO enthält keine gültige app_session_id")
         logger.debug(
             "APP_HELLO empfangen von %s, app_session_id=%s",
             hello.get("data", {}).get("server_name", "?"),
@@ -270,8 +329,24 @@ class Sitzung:
         while self.zustand in (SitzungsZustand.BEREIT, SitzungsZustand.VERALTET):
             try:
                 frame = await self._empfangen()
-            except (ConnectionError, OSError, ssl.SSLError) as fehler:
-                logger.error("Verbindungsfehler im Receiver: %s", fehler)
+            except EmpfangsTimeout as fehler:
+                # Kein Frame innerhalb EMPFANG_TIMEOUT – Verbindung unterbrochen
+                logger.error("Empfangs-Timeout im Receiver: %s", fehler)
+                await self._sitzung_schliessen("EMPFANG_TIMEOUT")
+                return
+            except FrameZuGross as fehler:
+                # Frame überschreitet MAX_FRAME_BYTES – Reader-Puffer inkonsistent,
+                # sofort schließen ohne APP_CLOSE zu senden
+                logger.error("Übergroßer Frame vom Peer empfangen: %s", fehler)
+                await self._sitzung_schliessen("FRAME_ZU_GROSS")
+                return
+            except ConnectionError as fehler:
+                # ConnectionError("Verbindung getrennt") = TCP FIN/RST vom Peer
+                logger.error("Verbindung vom Peer getrennt: %s", fehler)
+                await self._sitzung_schliessen("TCP_GETRENNT")
+                return
+            except (OSError, ssl.SSLError) as fehler:
+                logger.error("Socket-/TLS-Fehler im Receiver: %s", fehler)
                 await self._sitzung_schliessen("VERBINDUNGSFEHLER")
                 return
             except json.JSONDecodeError as fehler:
@@ -282,7 +357,7 @@ class Sitzung:
                 return
 
             # Activity-Timer zurücksetzen (Heartbeat-Policy)
-            self._last_activity = asyncio.get_event_loop().time()
+            self._last_activity = asyncio.get_running_loop().time()
             self._missed_pongs = 0
 
             if not self._validieren(frame):
@@ -375,7 +450,7 @@ class Sitzung:
 
         # Deduplizierung: bereits gesehene msg_id?
         if msg_id and msg_id in self._seen_ids:
-            logger.debug("Duplikat CHAT %s – verworfen, sende erneut RECV_ACK", msg_id)
+            logger.debug("Duplikat CHAT %s – verworfen, sende erneut APP_MSG_ACK", msg_id)
             if msg_id:
                 await self._senden(self._frame("APP_MSG_ACK", {"reply_to": msg_id}))
             return
@@ -407,28 +482,39 @@ class Sitzung:
         """
         try:
             while self.zustand == SitzungsZustand.BEREIT:
-                await asyncio.sleep(5.0)  # Prüfintervall
+                await asyncio.sleep(konfig.PRÜF_INTERVALL)
 
                 if self.zustand != SitzungsZustand.BEREIT:
                     break
 
-                jetzt = asyncio.get_event_loop().time()
+                jetzt = asyncio.get_running_loop().time()
                 idle_seit = jetzt - self._last_activity
 
                 if idle_seit < konfig.IDLE_TIMEOUT:
+                    self._verbindungs_zustand = VerbindungsZustand.VERBUNDEN
                     continue  # Noch aktiv – kein APP_PING nötig
+
+                self._verbindungs_zustand = VerbindungsZustand.IDLE
 
                 # APP_PING senden
                 ping_id = _neue_id("ping")
                 ping_fut: asyncio.Future = asyncio.get_running_loop().create_future()
                 self._pending_pings[ping_id] = ping_fut
+                self._verbindungs_zustand = VerbindungsZustand.PING_PENDING
 
-                await self._senden(self._frame("APP_PING", {}, msg_id=ping_id))
+                try:
+                    await self._senden(self._frame("APP_PING", {}, msg_id=ping_id))
+                except (OSError, ssl.SSLError) as fehler:
+                    self._pending_pings.pop(ping_id, None)
+                    logger.error("APP_PING senden fehlgeschlagen: %s – Verbindung schliessen", fehler)
+                    await self._sitzung_schliessen("HEARTBEAT_SENDEFEHLER")
+                    return
                 logger.debug("APP_PING gesendet (idle seit %.0fs)", idle_seit)
 
                 try:
                     await asyncio.wait_for(ping_fut, timeout=konfig.PONG_TIMEOUT)
                     self._missed_pongs = 0
+                    self._verbindungs_zustand = VerbindungsZustand.VERBUNDEN
                     logger.debug("APP_PONG empfangen")
                 except asyncio.TimeoutError:
                     self._pending_pings.pop(ping_id, None)
@@ -452,13 +538,14 @@ class Sitzung:
     async def chat_senden(self, text: str) -> bool:
         """Sendet eine CHAT-Nachricht und wartet auf RECV_ACK.
 
-        Bei Timeout wird die Verbindung als VERALTET markiert und geschlossen.
+        Wartet auf APP_MSG_ACK vom Peer. Bei Timeout wird die Verbindung als
+        VERALTET markiert und geschlossen.
 
         Parameter:
             text: Zu sendender Nachrichtentext.
 
         Rückgabe:
-            True bei bestätigtem Empfang durch den Peer-Prozess, False bei Fehler.
+            True bei bestätigtem Empfang (APP_MSG_ACK erhalten), False bei Fehler.
         """
         if self.zustand != SitzungsZustand.BEREIT:
             logger.error("chat_senden: Zustand %s statt BEREIT", self.zustand.value)
@@ -483,7 +570,7 @@ class Sitzung:
 
         try:
             await asyncio.wait_for(ack_fut, timeout=konfig.ACK_TIMEOUT)
-            logger.debug("RECV_ACK erhalten für %s", msg_id)
+            logger.debug("APP_MSG_ACK erhalten für %s", msg_id)
             return True
         except asyncio.TimeoutError:
             self._pending_acks.pop(msg_id, None)
@@ -512,25 +599,29 @@ class Sitzung:
 
     async def verbindungsabbau(self) -> None:
         """Geordneter Verbindungsabbau: CLOSE senden, Tasks stoppen, Socket schliessen."""
-        if self.zustand in (SitzungsZustand.GETRENNT, SitzungsZustand.SCHLIESSEN):
-            return
         await self._sitzung_schliessen("NUTZER_QUIT")
 
     async def _sitzung_schliessen(self, grund: str = "") -> None:
         """Interne Schliess-Logik.
 
-        Ablauf: Zustand → SCHLIESSEN, CLOSE senden, UI-Queue signalisieren,
+        Ablauf: Guard prüfen, Zustand → SCHLIESSEN, CLOSE senden, UI-Queue signalisieren,
         Hintergrund-Tasks canceln, Socket schliessen, Zustand → GETRENNT.
+
+        Der _geschlossen-Guard verhindert, dass gleichzeitig ausgelöste Timeouts
+        (z.B. EMPFANG_TIMEOUT + HEARTBEAT_TIMEOUT) die Schliess-Logik doppelt ausführen.
         """
-        if self.zustand in (SitzungsZustand.GETRENNT, SitzungsZustand.SCHLIESSEN):
+        if self._geschlossen:
             return
+        self._geschlossen = True
+        self.trenn_grund = grund
 
         self._zustand_setzen(SitzungsZustand.SCHLIESSEN)
+        self._verbindungs_zustand = VerbindungsZustand.GETRENNT
         logger.info("Sitzung wird geschlossen (Grund: %s)", grund)
 
         # CLOSE senden – nur wenn nicht Peer bereits geschlossen/Fehler
         if grund not in ("PEER_CLOSE", "PEER_FEHLER", "VERBINDUNGSFEHLER",
-                         "UNGUELTIGE_FRAME", "PFLICHTFELD_FEHLT"):
+                         "UNGUELTIGE_FRAME", "PFLICHTFELD_FEHLT", "FRAME_ZU_GROSS"):
             try:
                 close_frame = self._frame("APP_CLOSE", {"reason": grund})
                 await asyncio.wait_for(

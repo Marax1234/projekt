@@ -198,7 +198,9 @@ Beispiel CHAT-Nachricht:
 }
 ```
 
-**Zustandsautomat:** `TLS_AUFGEBAUT` → `HANDSHAKE_AUSSTEHEND` → `BEREIT` (→ `VERALTET` → `SCHLIESSEN` → `GETRENNT`)
+**Zustandsautomat (intern):** `TLS_AUFGEBAUT` → `HANDSHAKE_AUSSTEHEND` → `BEREIT` (→ `VERALTET` → `SCHLIESSEN` → `GETRENNT`)
+
+**Verbindungszustand (extern):** `VERBUNDEN` → `IDLE` → `PING_PENDING` → `GETRENNT` (+ `RECONNECTING` beim Wiederverbinden)
 
 **Sicherheit:**
 - **Vertraulichkeit & Integrität:** TLS 1.3 (AEAD) – gesamter Kanal verschlüsselt und integritätsgesichert
@@ -235,6 +237,37 @@ projekt/
 
 ---
 
+## Automatischer Reconnect
+
+Client- und Auto-Modus versuchen nach einem unerwarteten Verbindungsabbruch automatisch,
+die Verbindung wiederherzustellen. Die Wartezeit zwischen Versuchen steigt exponentiell
+(Backoff) und wird durch einen zufälligen Jitter ergänzt, um Gleichzeitigkeit zu vermeiden.
+
+| Parameter | Wert | Beschreibung |
+|---|---|---|
+| `MAX_RECONNECT_VERSUCHE` | 10 | Maximale Versuche vor Programmende |
+| Backoff-Formel | `min(2^versuch + jitter, 60 s)` | Versuch 1 ≈ 3 s, Versuch 6 ≈ 64 s → 60 s |
+
+Nur `quit`-Eingabe des Nutzers beendet die Schleife sofort.
+Der Server-Modus verwendet bereits eine Endlosschleife und benötigt kein Reconnect.
+
+---
+
+## Verbindungs-Timeouts
+
+| Konstante | Wert | Beschreibung |
+|---|---|---|
+| `IDLE_TIMEOUT` | 30 s | Kein Traffic → APP_PING senden |
+| `PONG_TIMEOUT` | 10 s | Warten auf APP_PONG |
+| `PRÜF_INTERVALL` | 5 s | Heartbeat-Prüfzyklus |
+| `MARGIN` | 5 s | Sicherheitspuffer |
+| `EMPFANG_TIMEOUT` | **50 s** | Abgeleitet: 30 + 10 + 5 + 5 |
+
+> `EMPFANG_TIMEOUT` wird in `konfig.py` **automatisch** aus den obigen Werten berechnet.
+> Änderungen an `IDLE_TIMEOUT` propagieren damit ohne manuelle Anpassung.
+
+---
+
 ## Fehlerbehebung
 
 | Problem | Lösung |
@@ -243,3 +276,4 @@ projekt/
 | `SSL: CERTIFICATE_VERIFY_FAILED` | `certs/ca_zertifikat.pem` fehlt oder Peer-Zertifikat nicht von dieser CA signiert |
 | `SSL: NO_CERTIFICATE_RETURNED` | Gegenseite hat kein Zertifikat gesendet – `bash certs/zertifikate_erstellen.sh` auf beiden VMs ausführen |
 | Keine Verbindung nach 15 s | IP falsch, Port blockiert oder beide im Client-Try |
+| Reconnect schlägt dauerhaft fehl | Nach 10 Versuchen beendet sich das Programm automatisch |

@@ -26,7 +26,7 @@ Verwendung:
         --modus   server|client  (manueller Modus, rückwärtskompatibel)
         --port    TCP-Port       (Standard: 6769)
         --name    Anzeigename    (Standard: "Peer", "Server" oder "Client")
-        --debug   DEBUG-Logging  (Standard: INFO)
+        --debug   DEBUG-Logging  (Standard: WARNING)
 """
 
 import argparse
@@ -110,7 +110,7 @@ def _argumente_parsen() -> argparse.Namespace:
         "--debug",
         action="store_true",
         default=False,
-        help="Aktiviert DEBUG-Log-Level (Standard: INFO)",
+        help="Aktiviert DEBUG-Log-Level (Standard: WARNING)",
     )
     return parser.parse_args()
 

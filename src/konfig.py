@@ -16,11 +16,10 @@ import pathlib
 PORT: int = 6769                      # Standard-TCP-Port für P2P-Chat
 BIND_ADRESSE: str = "0.0.0.0"        # Lausch-Adresse für den Server
 VERBINDUNGS_TIMEOUT: float = 10.0    # Sekunden bis Verbindungsaufbau abbricht
-EMPFANG_TIMEOUT: float = 30.0        # Sekunden bis Empfangs-Timeout
 SENDE_TIMEOUT: float = 10.0          # Sekunden bis Sende-Timeout
 MAX_VERBINDUNGEN: int = 1            # Maximale gleichzeitige Verbindungen (P2P = 1)
 RACE_TIMEOUT: float = 15.0           # Gesamtwartezeit Race-to-Connect (Sekunden)
-RACE_CLIENT_VERZOEGERUNG: float = 0.3  # Verzögerung des Client-Threads im Race (Sekunden)
+RACE_CLIENT_VERZOEGERUNG: float = 0.3  # Verzögerung des Client-Tasks im Race (Sekunden)
 
 # ---------------------------------------------------------------------------
 # TLS (mTLS – gegenseitige Authentifizierung)
@@ -43,16 +42,25 @@ LOG_DATEINAME: str = "p2pchat.log"   # Log-Datei im Projektverzeichnis
 APP_VERSION: str = "1.0"              # Anwendungsversion
 PROTOKOLL_VERSION: str = "1.0"        # Protokollversion (HELLO-Handshake)
 PUFFER_GROESSE: int = 4096            # Empfangspuffer in Bytes (Legacy)
+MAX_FRAME_BYTES: int = 65_536         # Maximale NDJSON-Frame-Größe in Bytes (DoS-Schutz)
 
 # Timeouts (Sekunden)
 HANDSHAKE_TIMEOUT: float = 5.0        # App-Handshake (HELLO/HELLO_ACK)
-ACK_TIMEOUT: float = 5.0              # CHAT → RECV_ACK
-PONG_TIMEOUT: float = 10.0            # APP_PING → APP_PONG
-IDLE_TIMEOUT: float = 30.0            # Idle-Zeit bis APP_PING gesendet wird
-CLOSE_TIMEOUT: float = 2.0            # Graceful-Close-Warte-Zeit
+ACK_TIMEOUT: float = 5.0              # CHAT → APP_MSG_ACK
+IDLE_TIMEOUT:    float = 30.0         # Wartezeit bis zum ersten APP_PING
+PONG_TIMEOUT:    float = 10.0         # Wartezeit auf APP_PONG
+PRÜF_INTERVALL:  float =  5.0         # Heartbeat-Prüfzyklus
+MARGIN:          float =  5.0         # Sicherheitspuffer Empfangs-Timeout
+CLOSE_TIMEOUT:   float =  2.0         # Graceful-Close-Warte-Zeit
+
+# Abgeleitet – nie manuell anpassen:
+EMPFANG_TIMEOUT: float = IDLE_TIMEOUT + PONG_TIMEOUT + PRÜF_INTERVALL + MARGIN  # = 50 s
 
 # Heartbeat
 HEARTBEAT_MAX_FEHLSCHLAEGE: int = 2   # Verpasste PONGs bis Verbindung geschlossen wird
+
+# Reconnect
+MAX_RECONNECT_VERSUCHE: int = 10      # Maximale Reconnect-Versuche vor Abbruch
 
 # Deduplizierung
 DEDUP_MAX_IDS: int = 1000             # Max. gecachte msg_ids pro Session

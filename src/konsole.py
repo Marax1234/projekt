@@ -17,6 +17,7 @@ Modul:        Network Security 2026
 
 import asyncio
 import logging
+import random
 import sys
 import threading
 
@@ -29,6 +30,51 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Backoff-Berechnung für Reconnect
+# ---------------------------------------------------------------------------
+
+def _backoff_sekunden(versuch: int, basis: float = 2.0, maximum: float = 60.0) -> float:
+    """Berechnet Wartezeit für exponentielles Backoff mit Jitter.
+
+    Parameter:
+        versuch: Anzahl bisheriger Fehlversuche (> 0).
+        basis:   Basis des Exponenten (Standard: 2.0).
+        maximum: Maximale Wartezeit in Sekunden (Standard: 60.0).
+
+    Rückgabe:
+        Wartezeit in Sekunden (capped bei maximum).
+    """
+    return min(basis ** versuch + random.uniform(0, 1), maximum)
+
+
+# ---------------------------------------------------------------------------
+# Semantische Trennmeldungen
+# ---------------------------------------------------------------------------
+
+def _zeige_trenn_meldung(sitzung: Sitzung, herkunft: str) -> None:
+    """Zeigt eine zum Trenngrund passende Meldung auf dem Terminal.
+
+    Bildet sitzung.trenn_grund auf eine sprechende Nutzer-Meldung ab:
+    - TCP_GETRENNT / PEER_CLOSE → „Verbindung vom Peer beendet"
+    - EMPFANG_TIMEOUT           → „Zeitüberschreitung – keine Daten vom Peer"
+    - HEARTBEAT_TIMEOUT         → „Heartbeat-Timeout – Peer nicht erreichbar"
+    - NUTZER_QUIT               → (keine Meldung, Nutzer hat bewusst beendet)
+    - Sonstiges                 → „Verbindung zu Peer unterbrochen"
+    """
+    grund = sitzung.trenn_grund
+    if grund in ("TCP_GETRENNT", "PEER_CLOSE"):
+        cli_ui.info_zeile(f"Verbindung vom {herkunft} beendet")
+    elif grund == "EMPFANG_TIMEOUT":
+        cli_ui.info_zeile(f"Zeitüberschreitung – keine Daten vom {herkunft}")
+    elif grund == "HEARTBEAT_TIMEOUT":
+        cli_ui.info_zeile(f"Heartbeat-Timeout – {herkunft} nicht erreichbar")
+    elif grund == "NUTZER_QUIT":
+        pass  # Nutzer hat selbst beendet – keine redundante Meldung
+    else:
+        cli_ui.info_zeile(f"Verbindung zu {herkunft} unterbrochen ({grund})")
+
+
+# ---------------------------------------------------------------------------
 # Gemeinsame Empfangs-Schleife
 # ---------------------------------------------------------------------------
 
@@ -36,7 +82,8 @@ async def _empfangs_schleife(sitzung: Sitzung, herkunft: str) -> None:
     """Liest CHAT-Nachrichten aus der UI-Queue und gibt sie auf dem Terminal aus.
 
     Läuft als asyncio Task. Beendet sich wenn die Sitzung None in die Queue
-    schreibt (Verbindungsende oder Fehler).
+    schreibt (Verbindungsende oder Fehler). Zeigt anschließend eine semantisch
+    korrekte Trennmeldung basierend auf sitzung.trenn_grund.
 
     Parameter:
         sitzung:  Aktive Sitzung
@@ -45,8 +92,7 @@ async def _empfangs_schleife(sitzung: Sitzung, herkunft: str) -> None:
     while True:
         frame = await sitzung.naechste_chat_nachricht()
         if frame is None:
-            if not sitzung.ist_aktiv:
-                cli_ui.info_zeile(f"Verbindung vom {herkunft} beendet")
+            _zeige_trenn_meldung(sitzung, herkunft)
             return
 
         payload     = frame.get("data", {})
@@ -121,7 +167,12 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
 # ---------------------------------------------------------------------------
 
 async def peer_starten(ziel: str, port: int, name: str) -> None:
-    """Startet die Anwendung im Race-to-Connect-Modus.
+    """Startet die Anwendung im Race-to-Connect-Modus mit automatischem Reconnect.
+
+    Nach einem unerwarteten Verbindungsabbruch wird automatisch mit exponentiellem
+    Backoff + Jitter versucht, die Verbindung wiederherzustellen
+    (max. MAX_RECONNECT_VERSUCHE Versuche). Erst wenn der Nutzer 'quit' eingibt,
+    wird die Schleife beendet.
 
     Parameter:
         ziel: IP-Adresse des anderen Peers
@@ -133,41 +184,65 @@ async def peer_starten(ziel: str, port: int, name: str) -> None:
     cli_ui.status_box("auto", port, name)
     print()
 
-    cli_ui.info_zeile(f"Race to Connect mit {ziel}:{port} ...")
-    cli_ui.info_zeile("Warte auf Verbindung oder verbinde – Rolle wird automatisch bestimmt")
-    print()
+    versuch = 0
 
-    try:
-        reader, writer, ist_server = await auto_verbinden(ziel, port)
-    except ConnectionError as fehler:
-        logger.error("Race-to-Connect fehlgeschlagen: %s", fehler)
-        cli_ui.info_zeile(f"Keine Verbindung zu {ziel}:{port} – Timeout überschritten")
-        return
-    except Exception as fehler:
-        logger.error("Unerwarteter Fehler beim Race-to-Connect: %s", fehler)
-        cli_ui.info_zeile(f"Verbindungsaufbau fehlgeschlagen: {fehler}")
-        return
+    while True:
+        # Backoff vor Reconnect-Versuchen
+        if versuch > 0:
+            if versuch >= konfig.MAX_RECONNECT_VERSUCHE:
+                cli_ui.fehler_zeile("Peer dauerhaft nicht erreichbar. Programm wird beendet.")
+                break
+            wartezeit = _backoff_sekunden(versuch)
+            cli_ui.info_zeile(
+                f"Verbindung verloren – Reconnect-Versuch {versuch} in {wartezeit:.0f} s ..."
+            )
+            await asyncio.sleep(wartezeit)
 
-    rolle = "Server" if ist_server else "Client"
-    logger.info("TLS verbunden als %s mit %s:%d", rolle, ziel, port)
+        cli_ui.info_zeile(f"Race to Connect mit {ziel}:{port} ...")
+        if versuch == 0:
+            cli_ui.info_zeile("Warte auf Verbindung oder verbinde – Rolle wird automatisch bestimmt")
+        print()
 
-    sitzung = Sitzung(reader, writer, absender_name=name, server_modus=ist_server)
+        try:
+            reader, writer, ist_server = await auto_verbinden(ziel, port)
+        except ConnectionError as fehler:
+            logger.error("Race-to-Connect fehlgeschlagen: %s", fehler)
+            cli_ui.info_zeile(f"Keine Verbindung zu {ziel}:{port} – Timeout überschritten")
+            versuch += 1
+            continue
+        except Exception as fehler:
+            logger.error("Unerwarteter Fehler beim Race-to-Connect: %s", fehler)
+            cli_ui.info_zeile(f"Verbindungsaufbau fehlgeschlagen: {fehler}")
+            versuch += 1
+            continue
 
-    cli_ui.info_zeile(f"TLS verbunden als {rolle} – führe App-Handshake durch ...")
-    try:
-        await sitzung.verbinden()
-    except ConnectionError as fehler:
-        logger.error("App-Handshake fehlgeschlagen: %s", fehler)
-        cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
-        return
+        versuch = 0  # Reset nach erfolgreicher Verbindung
+        rolle = "Server" if ist_server else "Client"
+        logger.info("TLS verbunden als %s mit %s:%d", rolle, ziel, port)
 
-    cli_ui.info_zeile(f"Verbunden als {rolle} mit {ziel}:{port}")
-    cli_ui.trennlinie()
-    print("  Nachrichten eingeben · 'quit' zum Beenden")
-    cli_ui.trennlinie()
-    print()
+        sitzung = Sitzung(reader, writer, absender_name=name, server_modus=ist_server)
 
-    await _chat_sitzung_fuehren(sitzung, "Peer")
+        cli_ui.info_zeile(f"TLS verbunden als {rolle} – führe App-Handshake durch ...")
+        try:
+            await sitzung.verbinden()
+        except ConnectionError as fehler:
+            logger.error("App-Handshake fehlgeschlagen: %s", fehler)
+            cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
+            versuch += 1
+            continue
+
+        cli_ui.info_zeile(f"Verbunden als {rolle} mit {ziel}:{port}")
+        cli_ui.trennlinie()
+        print("  Nachrichten eingeben · 'quit' zum Beenden")
+        cli_ui.trennlinie()
+        print()
+
+        quit_durch_nutzer = await _chat_sitzung_fuehren(sitzung, "Peer")
+
+        if quit_durch_nutzer:
+            break
+
+        versuch += 1  # Unerwartetes Ende → Reconnect vorbereiten
 
     print()
     cli_ui.trennlinie()
@@ -210,7 +285,11 @@ async def server_starten(port: int, name: str) -> None:
 
     try:
         server = await asyncio.start_server(
-            _handle, konfig.BIND_ADRESSE, port, ssl=tls_kontext_server(),
+            _handle,
+            konfig.BIND_ADRESSE,
+            port,
+            ssl=tls_kontext_server(),
+            limit=konfig.MAX_FRAME_BYTES,
         )
     except OSError as fehler:
         logger.error("Server-Socket konnte nicht erstellt werden: %s", fehler)
@@ -268,9 +347,12 @@ async def server_starten(port: int, name: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def client_starten(ziel: str, port: int, name: str) -> None:
-    """Startet die Anwendung im Client-Modus.
+    """Startet die Anwendung im Client-Modus mit automatischem Reconnect.
 
-    Verbindet sich einmalig mit dem angegebenen Ziel.
+    Nach einem unerwarteten Verbindungsabbruch wird automatisch mit exponentiellem
+    Backoff + Jitter versucht, die Verbindung wiederherzustellen
+    (max. MAX_RECONNECT_VERSUCHE Versuche). Erst wenn der Nutzer 'quit' eingibt,
+    wird die Schleife beendet.
 
     Parameter:
         ziel: IP-Adresse oder Hostname des Servers
@@ -282,32 +364,55 @@ async def client_starten(ziel: str, port: int, name: str) -> None:
     cli_ui.status_box("client", port, name)
     print()
 
-    cli_ui.info_zeile(f"Verbinde mit {ziel}:{port} ...")
-    try:
-        reader, writer = await verbindung_herstellen(ziel, port)
-        logger.info("TLS-Verbindung zu %s:%d hergestellt", ziel, port)
-    except Exception as fehler:
-        logger.error("Verbindungsaufbau zu %s:%d fehlgeschlagen: %s", ziel, port, fehler)
-        cli_ui.info_zeile(f"Verbindung zu {ziel}:{port} nicht möglich")
-        return
+    versuch = 0
 
-    sitzung = Sitzung(reader, writer, absender_name=name, server_modus=False)
+    while True:
+        # Backoff vor Reconnect-Versuchen
+        if versuch > 0:
+            if versuch >= konfig.MAX_RECONNECT_VERSUCHE:
+                cli_ui.fehler_zeile("Server dauerhaft nicht erreichbar. Programm wird beendet.")
+                break
+            wartezeit = _backoff_sekunden(versuch)
+            cli_ui.info_zeile(
+                f"Verbindung verloren – Reconnect-Versuch {versuch} in {wartezeit:.0f} s ..."
+            )
+            await asyncio.sleep(wartezeit)
 
-    cli_ui.info_zeile(f"TLS verbunden mit {ziel}:{port} – führe App-Handshake durch ...")
-    try:
-        await sitzung.verbinden()
-    except ConnectionError as fehler:
-        logger.error("App-Handshake fehlgeschlagen: %s", fehler)
-        cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
-        return
+        cli_ui.info_zeile(f"Verbinde mit {ziel}:{port} ...")
+        try:
+            reader, writer = await verbindung_herstellen(ziel, port)
+            logger.info("TLS-Verbindung zu %s:%d hergestellt", ziel, port)
+        except (ConnectionError, OSError) as fehler:
+            logger.error("Verbindungsaufbau zu %s:%d fehlgeschlagen: %s", ziel, port, fehler)
+            cli_ui.info_zeile(f"Verbindung zu {ziel}:{port} nicht möglich")
+            versuch += 1
+            continue
 
-    cli_ui.info_zeile(f"Sitzung bereit mit {ziel}:{port}")
-    cli_ui.trennlinie()
-    print("  Nachrichten eingeben · 'quit' zum Beenden")
-    cli_ui.trennlinie()
-    print()
+        versuch = 0  # Reset nach erfolgreicher Verbindung
 
-    await _chat_sitzung_fuehren(sitzung, "Server")
+        sitzung = Sitzung(reader, writer, absender_name=name, server_modus=False)
+
+        cli_ui.info_zeile(f"TLS verbunden mit {ziel}:{port} – führe App-Handshake durch ...")
+        try:
+            await sitzung.verbinden()
+        except ConnectionError as fehler:
+            logger.error("App-Handshake fehlgeschlagen: %s", fehler)
+            cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
+            versuch += 1
+            continue
+
+        cli_ui.info_zeile(f"Sitzung bereit mit {ziel}:{port}")
+        cli_ui.trennlinie()
+        print("  Nachrichten eingeben · 'quit' zum Beenden")
+        cli_ui.trennlinie()
+        print()
+
+        quit_durch_nutzer = await _chat_sitzung_fuehren(sitzung, "Server")
+
+        if quit_durch_nutzer:
+            break
+
+        versuch += 1  # Unerwartetes Ende → Reconnect vorbereiten
 
     print()
     cli_ui.trennlinie()
