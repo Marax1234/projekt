@@ -7,7 +7,7 @@ Beschreibung: Enthält die Startfunktionen für den interaktiven Konsolenbetrieb
               cli_ui.py für die Terminal-Ausgabe.
 
               Nach TLS-Verbindungsaufbau führt Sitzung.verbinden() den
-              App-Handshake (HELLO/HELLO_ACK) durch, bevor Chat-Nachrichten
+              App-Handshake (APP_HELLO/APP_HELLO_ACK) durch, bevor Chat-Nachrichten
               gesendet oder empfangen werden.
 
 Autor:        Gruppe 2
@@ -49,7 +49,7 @@ async def _empfangs_schleife(sitzung: Sitzung, herkunft: str) -> None:
                 cli_ui.info_zeile(f"Verbindung vom {herkunft} beendet")
             return
 
-        payload     = frame.get("payload", {})
+        payload     = frame.get("data", {})
         absender    = payload.get("sender", "Unbekannt")
         text        = payload.get("text", "")
         zeitstempel = frame.get("timestamp", "")

@@ -284,7 +284,7 @@ async def frame_senden(writer: asyncio.StreamWriter, frame: dict) -> None:
     except (OSError, ssl.SSLError) as fehler:
         logger.error("frame_senden fehlgeschlagen: %s", fehler)
         raise
-    logger.debug("Frame gesendet: type=%s", frame.get("type"))
+    logger.debug("Frame gesendet: msg_type=%s", frame.get("msg_type"))
 
 
 async def frame_empfangen(reader: asyncio.StreamReader) -> dict:
@@ -312,7 +312,7 @@ async def frame_empfangen(reader: asyncio.StreamReader) -> dict:
         raise ConnectionError("Verbindung getrennt")
 
     frame = json.loads(rohdaten.decode("utf-8"))
-    logger.debug("Frame empfangen: type=%s", frame.get("type"))
+    logger.debug("Frame empfangen: msg_type=%s", frame.get("msg_type"))
     return frame
 
 

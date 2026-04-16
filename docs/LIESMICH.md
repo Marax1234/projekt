@@ -160,7 +160,7 @@ Log-Phasen:
 ## Protokoll-Übersicht
 
 Das Anwendungsprotokoll läuft über **TCP + TLS 1.3**. Nach dem mTLS-Handshake
-folgt ein anwendungsspezifischer App-Handshake (HELLO/HELLO\_ACK). Erst danach
+folgt ein anwendungsspezifischer App-Handshake (`APP_HELLO`/`APP_HELLO_ACK`). Erst danach
 dürfen CHAT-Nachrichten gesendet werden.
 
 **Framing:** NDJSON (newline-delimited JSON) – jede Nachricht ist ein kompaktes
@@ -170,23 +170,31 @@ JSON-Objekt, abgeschlossen durch `\n`, UTF-8-kodiert.
 
 | Feld | Bedeutung |
 |---|---|
-| `type` | Nachrichtentyp (`HELLO`, `HELLO_ACK`, `CHAT`, `RECV_ACK`, `PING`, `PONG`, `ERROR`, `CLOSE`) |
+| `msg_type` | Nachrichtentyp (`APP_HELLO`, `APP_HELLO_ACK`, `CHAT`, `APP_MSG_ACK`, `APP_PING`, `APP_PONG`, `APP_ERROR`, `APP_CLOSE`) |
 | `protocol_version` | Immer `"1.0"` |
-| `session_id` | Gesetzt nach erfolgreichem App-Handshake |
+| `app_session_id` | Gesetzt nach erfolgreichem App-Handshake – **App-Ebene** (von TLS `legacy_session_id` zu unterscheiden) |
 | `msg_id` | UUID-basierte Nachrichten-ID |
 | `timestamp` | ISO-8601 UTC |
-| `payload` | Typabhängiger Nutzdaten-Block |
+| `data` | Typabhängiger Nutzdaten-Block |
+
+> **Warum `APP_`-Präfix und `app_session_id`?**
+> TLS 1.3 selbst verwendet `legacy_session_id` im Handshake sowie Nachrichtentypen wie
+> `client_hello`/`server_hello` (HandshakeType) und `close_notify`/Alert-Records.
+> ICMP und WebSocket verwenden `PING`/`PONG`. TCP verwendet ACK-Flags.
+> Das `APP_`-Präfix und der `app_`-Feldname machen auf Protokoll- und Log-Ebene eindeutig klar,
+> dass es sich um App-Schicht-Konstrukte handelt und keine Verwechslung mit gleichnamigen
+> TLS/TCP/ICMP-Feldern entstehen kann.
 
 Beispiel CHAT-Nachricht:
 
 ```json
 {
-  "type": "CHAT",
+  "msg_type": "CHAT",
   "protocol_version": "1.0",
-  "session_id": "sess-7f3c1234",
+  "app_session_id": "sess-7f3c1234",
   "msg_id": "msg-6f0d4b0e-...",
   "timestamp": "2026-04-16T11:20:00Z",
-  "payload": {"sender": "alice", "text": "Hallo"}
+  "data": {"sender": "alice", "text": "Hallo"}
 }
 ```
 

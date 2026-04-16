@@ -3,14 +3,14 @@ sitzung.py – Protokoll-Sitzungsmanagement mit State Machine
 
 Beschreibung: Vollständige Implementierung des Anwendungsprotokolls über TLS:
               - NDJSON-Framing (newline-delimited JSON)
-              - Nachrichtenschema: type, protocol_version, msg_id, session_id, timestamp, payload
+              - Nachrichtenschema: msg_type, protocol_version, msg_id, app_session_id, timestamp, data
               - 7-Zustands-Automat: GETRENNT → TLS_AUFGEBAUT → HANDSHAKE_AUSSTEHEND
                                     → BEREIT → VERALTET → SCHLIESSEN → GETRENNT
-              - App-Handshake (HELLO / HELLO_ACK) nach TLS
-              - CHAT + RECV_ACK mit Timeout → STALE/Close
-              - Deduplizierung per session_id (OrderedDict, max DEDUP_MAX_IDS)
-              - Heartbeat (PING/PONG) nur bei Idle, nach 2 verpassten PONGs trennen
-              - Geordneter Verbindungsabbau (CLOSE) und Fehlerbehandlung (ERROR)
+              - App-Handshake (APP_HELLO / APP_HELLO_ACK) nach TLS
+              - CHAT + APP_MSG_ACK mit Timeout → STALE/APP_CLOSE
+              - Deduplizierung per app_session_id (OrderedDict, max DEDUP_MAX_IDS)
+              - Heartbeat (APP_PING/APP_PONG) nur bei Idle, nach 2 verpassten APP_PONGs trennen
+              - Geordneter Verbindungsabbau (APP_CLOSE) und Fehlerbehandlung (APP_ERROR)
 Autor:        Gruppe 2
 Datum:        2026-04-16
 Modul:        Network Security 2026
@@ -138,12 +138,12 @@ class Sitzung:
     def _frame(self, typ: str, payload: dict, msg_id: str | None = None) -> dict:
         """Baut einen vollständigen Protokoll-Frame mit allen Pflichtfeldern."""
         return {
-            "type": typ,
+            "msg_type": typ,
             "protocol_version": konfig.PROTOKOLL_VERSION,
-            "session_id": self.sitzungs_id,
+            "app_session_id": self.sitzungs_id,
             "msg_id": msg_id or _neue_id(),
             "timestamp": _jetzt_iso(),
-            "payload": payload,
+            "data": payload,
         }
 
     # -------------------------------------------------------------------------
@@ -152,9 +152,9 @@ class Sitzung:
 
     def _validieren(self, frame: dict) -> bool:
         """Prüft Pflichtfelder und Protokollversion eines empfangenen Frames."""
-        for pflicht in ("type", "protocol_version", "timestamp"):
+        for pflicht in ("msg_type", "protocol_version", "timestamp"):
             if pflicht not in frame:
-                logger.error("Pflichtfeld fehlt: %s (Frame: %s)", pflicht, frame.get("type"))
+                logger.error("Pflichtfeld fehlt: %s (Frame: %s)", pflicht, frame.get("msg_type"))
                 return False
         if frame["protocol_version"] != konfig.PROTOKOLL_VERSION:
             logger.error(
@@ -171,7 +171,7 @@ class Sitzung:
     async def verbinden(self) -> None:
         """Führt den App-Handshake durch und startet Receiver/Heartbeat-Tasks.
 
-        Server sendet HELLO, Client antwortet mit HELLO_ACK.
+        Server sendet APP_HELLO, Client antwortet mit APP_HELLO_ACK.
         Erst nach Abschluss wird der Zustand auf BEREIT gesetzt.
 
         Wirft:
@@ -204,68 +204,68 @@ class Sitzung:
             self._heartbeat_loop(), name="HeartbeatLoop"
         )
         logger.info(
-            "Sitzung bereit: session_id=%s, Peer=%s",
+            "Sitzung bereit: app_session_id=%s, Peer=%s",
             self.sitzungs_id, self.absender_name,
         )
 
     async def _handshake_server(self) -> None:
-        """Server: HELLO senden, auf HELLO_ACK warten."""
+        """Server: APP_HELLO senden, auf APP_HELLO_ACK warten."""
         self.sitzungs_id = "sess-" + str(uuid.uuid4())[:8]
 
         hello = self._frame(
-            "HELLO",
-            {"server_name": self.absender_name, "capabilities": ["recv_ack", "ping"]},
+            "APP_HELLO",
+            {"server_name": self.absender_name, "capabilities": ["app_msg_ack", "app_ping"]},
         )
         await self._senden(hello)
-        logger.debug("HELLO gesendet (session_id=%s)", self.sitzungs_id)
+        logger.debug("APP_HELLO gesendet (app_session_id=%s)", self.sitzungs_id)
 
         ack = await asyncio.wait_for(
             self._empfangen(), timeout=konfig.HANDSHAKE_TIMEOUT
         )
 
-        if not self._validieren(ack) or ack.get("type") != "HELLO_ACK":
+        if not self._validieren(ack) or ack.get("msg_type") != "APP_HELLO_ACK":
             raise ConnectionError(
-                f"Erwartetes HELLO_ACK, erhalten: {ack.get('type')}"
+                f"Erwartetes APP_HELLO_ACK, erhalten: {ack.get('msg_type')}"
             )
         logger.debug(
-            "HELLO_ACK empfangen von %s",
-            ack.get("payload", {}).get("client_name", "?"),
+            "APP_HELLO_ACK empfangen von %s",
+            ack.get("data", {}).get("client_name", "?"),
         )
 
     async def _handshake_client(self) -> None:
-        """Client: auf HELLO warten, HELLO_ACK senden."""
+        """Client: auf APP_HELLO warten, APP_HELLO_ACK senden."""
         hello = await asyncio.wait_for(
             self._empfangen(), timeout=konfig.HANDSHAKE_TIMEOUT
         )
 
-        if not self._validieren(hello) or hello.get("type") != "HELLO":
+        if not self._validieren(hello) or hello.get("msg_type") != "APP_HELLO":
             raise ConnectionError(
-                f"Erwartetes HELLO, erhalten: {hello.get('type')}"
+                f"Erwartetes APP_HELLO, erhalten: {hello.get('msg_type')}"
             )
 
-        self.sitzungs_id = hello.get("session_id", "")
+        self.sitzungs_id = hello.get("app_session_id", "")
         logger.debug(
-            "HELLO empfangen von %s, session_id=%s",
-            hello.get("payload", {}).get("server_name", "?"),
+            "APP_HELLO empfangen von %s, app_session_id=%s",
+            hello.get("data", {}).get("server_name", "?"),
             self.sitzungs_id,
         )
 
         ack = self._frame(
-            "HELLO_ACK",
-            {"client_name": self.absender_name, "capabilities": ["recv_ack", "ping"]},
+            "APP_HELLO_ACK",
+            {"client_name": self.absender_name, "capabilities": ["app_msg_ack", "app_ping"]},
         )
         await self._senden(ack)
-        logger.debug("HELLO_ACK gesendet")
+        logger.debug("APP_HELLO_ACK gesendet")
 
     # -------------------------------------------------------------------------
     # Receiver Loop (Schritt 5 der Implementierungsreihenfolge)
     # -------------------------------------------------------------------------
 
     async def _receiver_loop(self) -> None:
-        """Empfangs-Schleife: liest Frames und dispatcht nach type.
+        """Empfangs-Schleife: liest Frames und dispatcht nach msg_type.
 
         Läuft als asyncio Task im Hintergrund. Trennt interne Protokoll-Frames
-        (RECV_ACK, PING, PONG, ERROR) von CHAT-Nachrichten für die UI.
+        (APP_MSG_ACK, APP_PING, APP_PONG, APP_ERROR) von CHAT-Nachrichten für die UI.
         """
         while self.zustand in (SitzungsZustand.BEREIT, SitzungsZustand.VERALTET):
             try:
@@ -290,46 +290,46 @@ class Sitzung:
                 await self._sitzung_schliessen("PFLICHTFELD_FEHLT")
                 return
 
-            # Session-ID-Prüfung (nach Handshake muss sie übereinstimmen)
-            frame_session_id = frame.get("session_id", "")
+            # App-Session-ID-Prüfung (nach Handshake muss sie übereinstimmen)
+            frame_session_id = frame.get("app_session_id", "")
             if frame_session_id != self.sitzungs_id:
                 logger.error(
-                    "session_id-Mismatch: erwartet=%s, erhalten=%s",
+                    "app_session_id-Mismatch: erwartet=%s, erhalten=%s",
                     self.sitzungs_id, frame_session_id,
                 )
                 await self._fehler_senden(
                     "SESSION_MISMATCH",
-                    f"session_id mismatch: {frame_session_id}",
+                    f"app_session_id mismatch: {frame_session_id}",
                 )
                 await self._sitzung_schliessen("SESSION_MISMATCH")
                 return
 
-            await self._dispatch(frame.get("type"), frame)
+            await self._dispatch(frame.get("msg_type"), frame)
 
     async def _dispatch(self, typ: str | None, frame: dict) -> None:
-        """Verteilt einen validierten Frame nach seinem type-Feld."""
+        """Verteilt einen validierten Frame nach seinem msg_type-Feld."""
 
-        if typ == "RECV_ACK":
-            # ACK für gesendete CHAT-Nachricht → passendes Future erfüllen
-            reply_to = frame.get("payload", {}).get("reply_to", "")
+        if typ == "APP_MSG_ACK":
+            # App-Ebene-ACK für gesendete CHAT-Nachricht → passendes Future erfüllen
+            reply_to = frame.get("data", {}).get("reply_to", "")
             fut = self._pending_acks.pop(reply_to, None)
             if fut and not fut.done():
                 fut.set_result(True)
             else:
-                logger.debug("RECV_ACK für unbekannte msg_id %s – ignoriert", reply_to)
+                logger.debug("APP_MSG_ACK für unbekannte msg_id %s – ignoriert", reply_to)
 
-        elif typ == "PONG":
-            # Antwort auf PING → passendes Future erfüllen
-            reply_to = frame.get("payload", {}).get("reply_to", "")
+        elif typ == "APP_PONG":
+            # Antwort auf APP_PING → passendes Future erfüllen
+            reply_to = frame.get("data", {}).get("reply_to", "")
             fut = self._pending_pings.pop(reply_to, None)
             if fut and not fut.done():
                 fut.set_result(True)
             else:
-                logger.debug("PONG ohne offenes PING %s – ignoriert", reply_to)
+                logger.debug("APP_PONG ohne offenes APP_PING %s – ignoriert", reply_to)
 
-        elif typ == "PING":
-            # Eingehender PING → sofort PONG senden
-            pong = self._frame("PONG", {"reply_to": frame.get("msg_id", "")})
+        elif typ == "APP_PING":
+            # Eingehender APP_PING → sofort APP_PONG senden
+            pong = self._frame("APP_PONG", {"reply_to": frame.get("msg_id", "")})
             await self._senden(pong)
 
         elif typ == "CHAT":
@@ -341,19 +341,19 @@ class Sitzung:
                 return
             await self._chat_empfangen(frame)
 
-        elif typ == "ERROR":
+        elif typ == "APP_ERROR":
             logger.error(
-                "ERROR vom Peer: code=%s detail=%s",
-                frame.get("payload", {}).get("code", ""),
-                frame.get("payload", {}).get("detail", ""),
+                "APP_ERROR vom Peer: code=%s detail=%s",
+                frame.get("data", {}).get("code", ""),
+                frame.get("data", {}).get("detail", ""),
             )
             await self._sitzung_schliessen("PEER_FEHLER")
 
-        elif typ == "CLOSE":
-            logger.info("CLOSE vom Peer empfangen")
+        elif typ == "APP_CLOSE":
+            logger.info("APP_CLOSE vom Peer empfangen")
             await self._sitzung_schliessen("PEER_CLOSE")
 
-        elif typ in ("HELLO", "HELLO_ACK"):
+        elif typ in ("APP_HELLO", "APP_HELLO_ACK"):
             logger.error("Unerwartetes %s im Zustand BEREIT", typ)
             await self._fehler_senden("PROTOKOLL_VERLETZUNG", f"{typ} nach READY")
             await self._sitzung_schliessen("PROTOKOLL_VERLETZUNG")
@@ -377,7 +377,7 @@ class Sitzung:
         if msg_id and msg_id in self._seen_ids:
             logger.debug("Duplikat CHAT %s – verworfen, sende erneut RECV_ACK", msg_id)
             if msg_id:
-                await self._senden(self._frame("RECV_ACK", {"reply_to": msg_id}))
+                await self._senden(self._frame("APP_MSG_ACK", {"reply_to": msg_id}))
             return
 
         # Deduplizierungs-Cache pflegen (FIFO, max DEDUP_MAX_IDS)
@@ -386,9 +386,9 @@ class Sitzung:
             if len(self._seen_ids) > konfig.DEDUP_MAX_IDS:
                 self._seen_ids.popitem(last=False)
 
-        # RECV_ACK senden: bestätigt "peer-process received", nicht UI-Anzeige
+        # APP_MSG_ACK senden: bestätigt "peer-process received" auf App-Ebene (≠ TCP ACK)
         if msg_id:
-            await self._senden(self._frame("RECV_ACK", {"reply_to": msg_id}))
+            await self._senden(self._frame("APP_MSG_ACK", {"reply_to": msg_id}))
 
         # An UI-Queue übergeben
         await self.ui_queue.put(frame)
@@ -398,12 +398,12 @@ class Sitzung:
     # -------------------------------------------------------------------------
 
     async def _heartbeat_loop(self) -> None:
-        """Heartbeat-Schleife: sendet PING nur bei Idle.
+        """Heartbeat-Schleife: sendet APP_PING nur bei Idle.
 
         Policy (aus konfig.py):
         - Nur senden wenn IDLE_TIMEOUT Sekunden kein Traffic
-        - PONG innerhalb PONG_TIMEOUT Sekunden erwartet
-        - Nach HEARTBEAT_MAX_FEHLSCHLAEGE verpassten PONGs → SCHLIESSEN
+        - APP_PONG innerhalb PONG_TIMEOUT Sekunden erwartet
+        - Nach HEARTBEAT_MAX_FEHLSCHLAEGE verpassten APP_PONGs → SCHLIESSEN
         """
         try:
             while self.zustand == SitzungsZustand.BEREIT:
@@ -416,25 +416,25 @@ class Sitzung:
                 idle_seit = jetzt - self._last_activity
 
                 if idle_seit < konfig.IDLE_TIMEOUT:
-                    continue  # Noch aktiv – kein PING nötig
+                    continue  # Noch aktiv – kein APP_PING nötig
 
-                # PING senden
+                # APP_PING senden
                 ping_id = _neue_id("ping")
                 ping_fut: asyncio.Future = asyncio.get_running_loop().create_future()
                 self._pending_pings[ping_id] = ping_fut
 
-                await self._senden(self._frame("PING", {}, msg_id=ping_id))
-                logger.debug("PING gesendet (idle seit %.0fs)", idle_seit)
+                await self._senden(self._frame("APP_PING", {}, msg_id=ping_id))
+                logger.debug("APP_PING gesendet (idle seit %.0fs)", idle_seit)
 
                 try:
                     await asyncio.wait_for(ping_fut, timeout=konfig.PONG_TIMEOUT)
                     self._missed_pongs = 0
-                    logger.debug("PONG empfangen")
+                    logger.debug("APP_PONG empfangen")
                 except asyncio.TimeoutError:
                     self._pending_pings.pop(ping_id, None)
                     self._missed_pongs += 1
                     logger.warning(
-                        "PONG-Timeout (verpasst=%d/%d)",
+                        "APP_PONG-Timeout (verpasst=%d/%d)",
                         self._missed_pongs, konfig.HEARTBEAT_MAX_FEHLSCHLAEGE,
                     )
                     if self._missed_pongs >= konfig.HEARTBEAT_MAX_FEHLSCHLAEGE:
@@ -499,9 +499,9 @@ class Sitzung:
     # -------------------------------------------------------------------------
 
     async def _fehler_senden(self, code: str, detail: str) -> None:
-        """Sendet einen ERROR-Frame (Best-effort, Fehler werden ignoriert)."""
+        """Sendet einen APP_ERROR-Frame (Best-effort, Fehler werden ignoriert)."""
         try:
-            frame = self._frame("ERROR", {"code": code, "detail": detail})
+            frame = self._frame("APP_ERROR", {"code": code, "detail": detail})
             await self._senden(frame)
         except Exception:
             pass
@@ -532,7 +532,7 @@ class Sitzung:
         if grund not in ("PEER_CLOSE", "PEER_FEHLER", "VERBINDUNGSFEHLER",
                          "UNGUELTIGE_FRAME", "PFLICHTFELD_FEHLT"):
             try:
-                close_frame = self._frame("CLOSE", {"reason": grund})
+                close_frame = self._frame("APP_CLOSE", {"reason": grund})
                 await asyncio.wait_for(
                     self._senden(close_frame), timeout=konfig.CLOSE_TIMEOUT
                 )

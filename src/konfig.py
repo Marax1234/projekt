@@ -47,8 +47,8 @@ PUFFER_GROESSE: int = 4096            # Empfangspuffer in Bytes (Legacy)
 # Timeouts (Sekunden)
 HANDSHAKE_TIMEOUT: float = 5.0        # App-Handshake (HELLO/HELLO_ACK)
 ACK_TIMEOUT: float = 5.0              # CHAT → RECV_ACK
-PONG_TIMEOUT: float = 10.0            # PING → PONG
-IDLE_TIMEOUT: float = 30.0            # Idle-Zeit bis PING gesendet wird
+PONG_TIMEOUT: float = 10.0            # APP_PING → APP_PONG
+IDLE_TIMEOUT: float = 30.0            # Idle-Zeit bis APP_PING gesendet wird
 CLOSE_TIMEOUT: float = 2.0            # Graceful-Close-Warte-Zeit
 
 # Heartbeat
