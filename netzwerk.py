@@ -188,7 +188,10 @@ async def auto_verbinden(
             return await asyncio.wait_for(verbunden, timeout=konfig.RACE_TIMEOUT)
         finally:
             server.close()
-            await server.wait_closed()
+            # server.wait_closed() würde blockieren bis ALLE aktiven
+            # Verbindungen geschlossen sind – d.h. bis die Chat-Sitzung endet.
+            # Wir rufen es daher NICHT ab; server.close() genügt, um
+            # weitere Verbindungsannahmen zu stoppen.
 
     async def _client_versuch() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         """Wartet kurz, dann verbindet sich zum Gegenpeer."""
