@@ -41,14 +41,14 @@ openssl x509 -in zertifikat.pem -noout -text | grep -E "Subject:|Validity"
 
 ### Auto-Modus – Race to Connect (empfohlen)
 
-**VM1 (z. B. IP 192.168.56.101):**
+**VM1 (z. B. IP 192.168.100.1):**
 ```bash
-python3 hauptprogramm.py --ziel 192.168.56.102 --port 6769
+python3 hauptprogramm.py --ziel 192.168.100.2 --port 6769 
 ```
 
-**VM2 (z. B. IP 192.168.56.102):**
+**VM2 (z. B. IP 192.168.100.2):**
 ```bash
-python3 hauptprogramm.py --ziel 192.168.56.101 --port 6769
+python3 hauptprogramm.py --ziel 192.168.100.1 --port 6769
 ```
 
 Beide Peers starten gleichzeitig. Die Rolle (Server/Client) wird

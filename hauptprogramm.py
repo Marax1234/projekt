@@ -2,8 +2,7 @@
 hauptprogramm.py – Entry-Point, argparse, Orchestrierung
 
 Beschreibung: Einstiegspunkt der Anwendung. Parst Kommandozeilenargumente,
-              initialisiert Logging, registriert Signal-Handler und startet
-              die Anwendung im Konsolenmodus.
+              initialisiert Logging, und startet die Anwendung via asyncio.run().
 
               Konsolenbetrieb:  konsole.py  (peer_starten / server_starten / client_starten)
               Terminal-UI:      cli_ui.py   (Box-Chars, figlet-Banner)
@@ -31,12 +30,12 @@ Verwendung:
 """
 
 import argparse
+import asyncio
 import logging
 import sys
 
 import konfig
 import konsole
-from konsole import peer_starten
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _logging_initialisieren(level: str) -> None:
-    """Konfiguriert das Logging-System für die gesamte Anwendung.
-
-    Parameter:
-        level: Log-Level als String (DEBUG, INFO, WARNING, ERROR)
-    """
+    """Konfiguriert das Logging-System für die gesamte Anwendung."""
     numerischer_level = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(
         level=numerischer_level,
@@ -124,13 +119,8 @@ def _argumente_parsen() -> argparse.Namespace:
 # Einstiegspunkt
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    """Parst Argumente, initialisiert Logging und startet den gewählten Modus.
-
-    Priorisierung:
-        1. --ziel ohne --modus → Race-to-Connect (Auto-Modus, empfohlen)
-        2. --modus server/client → manueller Modus (rückwärtskompatibel)
-    """
+async def main() -> None:
+    """Parst Argumente, initialisiert Logging und startet den gewählten Modus."""
     args = _argumente_parsen()
 
     log_level = "DEBUG" if args.debug else konfig.LOG_LEVEL
@@ -143,7 +133,7 @@ def main() -> None:
             "Starte P2P-Chat im Auto-Modus (Ziel: %s, Name: %s, Port: %d)",
             args.ziel, name, args.port,
         )
-        peer_starten(args.ziel, args.port, name)
+        await konsole.peer_starten(args.ziel, args.port, name)
         return
 
     # 2. Manueller Modus (rückwärtskompatibel): --modus server|client
@@ -168,10 +158,13 @@ def main() -> None:
     )
 
     if args.modus == "server":
-        konsole.server_starten(args.port, name)
+        await konsole.server_starten(args.port, name)
     else:
-        konsole.client_starten(args.ziel, args.port, name)
+        await konsole.client_starten(args.ziel, args.port, name)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

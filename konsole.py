@@ -11,13 +11,14 @@ Datum:        2026-03-26
 Modul:        Network Security 2026
 """
 
+import asyncio
 import logging
-import select
 import sys
 import threading
 
 import cli_ui
-from netzwerk import auto_verbinden, server_erstellen, verbindung_akzeptieren, verbindung_herstellen
+import konfig
+from netzwerk import auto_verbinden, tls_kontext_server, verbindung_herstellen
 from sitzung import Sitzung, SitzungsZustand
 
 logger = logging.getLogger(__name__)
@@ -27,50 +28,99 @@ logger = logging.getLogger(__name__)
 # Gemeinsame Empfangs-Schleife
 # ---------------------------------------------------------------------------
 
-def _empfangs_schleife(sitzung: Sitzung, trenn_ereignis: threading.Event, herkunft: str) -> None:
-    """Empfängt Nachrichten in einem Hintergrund-Thread.
+async def _empfangs_schleife(sitzung: Sitzung, herkunft: str) -> None:
+    """Empfängt Nachrichten als async Task.
 
-    Läuft solange die Sitzung aktiv ist. Bei Verbindungsabbruch (Gegenseite
-    schliesst Socket) setzt nachricht_empfangen den Zustand auf GETRENNT,
-    woraufhin diese Schleife endet und das Trenn-Ereignis auslöst.
+    Läuft solange die Sitzung aktiv ist. Bei Verbindungsabbruch setzt
+    nachricht_empfangen den Zustand auf GETRENNT, woraufhin die Schleife endet.
 
     Parameter:
-        sitzung:        Aktive Sitzung
-        trenn_ereignis: Wird gesetzt, wenn die Verbindung enden soll
-        herkunft:       Bezeichnung der Gegenseite für Meldungen (z.B. "Client")
+        sitzung:  Aktive Sitzung
+        herkunft: Bezeichnung der Gegenseite für Meldungen (z.B. "Client")
     """
-    while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
-        nachricht = sitzung.nachricht_empfangen()
+    while sitzung.zustand == SitzungsZustand.VERBUNDEN:
+        nachricht = await sitzung.nachricht_empfangen()
         if nachricht is None:
             if sitzung.zustand != SitzungsZustand.VERBUNDEN:
-                # Verbindung wurde von der Gegenseite geschlossen
                 cli_ui.info_zeile(f"Verbindung vom {herkunft} beendet")
-                trenn_ereignis.set()
-                return
-            continue  # Timeout – Verbindung noch aktiv
-        absender    = nachricht.get("absender", "Unbekannt")   # Anzeigename des Senders
-        zeitstempel = nachricht.get("zeitstempel", "")         # ISO-8601-Zeitstempel
-        text        = nachricht.get("nachricht", "")           # Nachrichtentext
+            return
+        absender    = nachricht.get("absender", "Unbekannt")
+        zeitstempel = nachricht.get("zeitstempel", "")
+        text        = nachricht.get("nachricht", "")
         cli_ui.nachricht_ausgeben(absender, text, zeitstempel)
         logger.info("[%s] %s: %s", zeitstempel, absender, text)
-    trenn_ereignis.set()
+
+
+# ---------------------------------------------------------------------------
+# Gemeinsame Chat-Sitzungsführung
+# ---------------------------------------------------------------------------
+
+async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
+    """Führt eine Chat-Sitzung durch: Empfang und Eingabe laufen parallel.
+
+    Empfang läuft als asyncio Task. Nutzereingabe läuft via asyncio.to_thread,
+    damit der Event-Loop nicht blockiert. cli_ui.eingabe_prompt (mit
+    threading.Event) vermittelt zuverlässig, wenn die Gegenseite trennt.
+
+    Parameter:
+        sitzung:  Aktive Sitzung
+        herkunft: Bezeichnung der Gegenseite (z.B. "Client", "Server", "Peer")
+
+    Rückgabe:
+        True wenn Nutzer 'quit' eingegeben hat, sonst False.
+    """
+    trenn_ereignis = threading.Event()
+    quit_durch_nutzer = False
+
+    async def _empfang_mit_signal() -> None:
+        """Empfangs-Schleife – setzt trenn_ereignis wenn Verbindung endet."""
+        await _empfangs_schleife(sitzung, herkunft)
+        trenn_ereignis.set()
+
+    empfang_task = asyncio.create_task(_empfang_mit_signal())
+
+    try:
+        while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
+            try:
+                eingabe = await asyncio.to_thread(cli_ui.eingabe_prompt, trenn_ereignis)
+            except (EOFError, KeyboardInterrupt):
+                logger.info("Eingabe unterbrochen – trenne Verbindung")
+                break
+            if eingabe is None:
+                break  # Verbindung von Gegenseite getrennt
+            if not eingabe:
+                continue
+            if eingabe.lower() in ("quit", "exit", "q"):
+                quit_durch_nutzer = True
+                break
+            if not await sitzung.nachricht_senden(eingabe):
+                cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
+                break
+    finally:
+        trenn_ereignis.set()
+        empfang_task.cancel()
+        try:
+            await empfang_task
+        except asyncio.CancelledError:
+            pass
+
+    if sitzung.zustand == SitzungsZustand.VERBUNDEN:
+        await sitzung.verbindungsabbau()
+
+    return quit_durch_nutzer
 
 
 # ---------------------------------------------------------------------------
 # Auto-Modus (Race to Connect) – keine manuelle Rollenwahl
 # ---------------------------------------------------------------------------
 
-def peer_starten(ziel: str, port: int, name: str) -> None:
+async def peer_starten(ziel: str, port: int, name: str) -> None:
     """Startet die Anwendung im Race-to-Connect-Modus.
-
-    Beide Peers starten mit der IP des jeweils anderen Peers als --ziel.
-    Die Server/Client-Rolle wird automatisch durch „Race to Connect"
-    bestimmt: wer zuerst eine Verbindung akzeptiert oder herstellt, gewinnt.
 
     Parameter:
         ziel: IP-Adresse des anderen Peers
-        port: TCP-Port (wird für Server-Bind und Client-Connect verwendet)
-        name: Anzeigename für Log-Ausgaben und Nachrichten
+        port: TCP-Port
+        name: Anzeigename für Nachrichten
     """
     cli_ui.banner_anzeigen()
     print()
@@ -82,7 +132,7 @@ def peer_starten(ziel: str, port: int, name: str) -> None:
     print()
 
     try:
-        verbindung, ist_server = auto_verbinden(ziel, port)
+        reader, writer, ist_server = await auto_verbinden(ziel, port)
     except ConnectionError as fehler:
         logger.error("Race-to-Connect fehlgeschlagen: %s", fehler)
         cli_ui.info_zeile(f"Keine Verbindung zu {ziel}:{port} – Timeout überschritten")
@@ -95,45 +145,15 @@ def peer_starten(ziel: str, port: int, name: str) -> None:
     rolle = "Server" if ist_server else "Client"
     logger.info("Verbunden als %s mit %s:%d", rolle, ziel, port)
 
-    sitzung = Sitzung(verbindung, absender_name=name, server_modus=ist_server)
+    sitzung = Sitzung(reader, writer, absender_name=name, server_modus=ist_server)
 
     cli_ui.info_zeile(f"Verbunden als {rolle} mit {ziel}:{port}")
     cli_ui.trennlinie()
-    print(f"  Nachrichten eingeben · 'quit' zum Beenden")
+    print("  Nachrichten eingeben · 'quit' zum Beenden")
     cli_ui.trennlinie()
     print()
 
-    trenn_ereignis = threading.Event()
-    empfangs_thread = threading.Thread(
-        target=_empfangs_schleife,
-        args=(sitzung, trenn_ereignis, "Peer"),
-        daemon=True,
-        name="PeerEmpfang",
-    )
-    empfangs_thread.start()
-
-    while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
-        try:
-            eingabe = cli_ui.eingabe_prompt(trenn_ereignis)
-        except (EOFError, KeyboardInterrupt):
-            logger.info("Eingabe unterbrochen – trenne Verbindung")
-            break
-        if eingabe is None:
-            break
-        if not eingabe:
-            continue
-        if eingabe.lower() in ("quit", "exit", "q"):
-            logger.info("Nutzer hat Verbindungsabbau angefordert")
-            break
-        if not sitzung.nachricht_senden(eingabe):
-            logger.error("Nachricht konnte nicht gesendet werden – Verbindung verloren")
-            cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
-            break
-
-    trenn_ereignis.set()
-    if sitzung.zustand == SitzungsZustand.VERBUNDEN:
-        sitzung.verbindungsabbau()
-    empfangs_thread.join(timeout=2.0)
+    await _chat_sitzung_fuehren(sitzung, "Peer")
 
     print()
     cli_ui.trennlinie()
@@ -147,115 +167,76 @@ def peer_starten(ziel: str, port: int, name: str) -> None:
 # Server-Modus
 # ---------------------------------------------------------------------------
 
-def server_starten(port: int, name: str) -> None:
+async def server_starten(port: int, name: str) -> None:
     """Startet die Anwendung im Server-Modus.
 
     Lauscht dauerhaft auf neue Verbindungen. Nach einem Verbindungsabbau
-    wartet der Server sofort auf den nächsten Client.
+    wartet der Server sofort auf den nächsten Client. Ctrl+C beendet den Server.
+    'quit' während einer aktiven Sitzung beendet den Server nach der Sitzung.
 
     Parameter:
         port: TCP-Port auf dem gelauscht wird
-        name: Anzeigename für Log-Ausgaben und Nachrichten
+        name: Anzeigename für Nachrichten
     """
     cli_ui.banner_anzeigen()
     print()
     cli_ui.status_box("server", port, name)
     print()
 
+    # Future wird pro Client-Zyklus neu gesetzt
+    naechster: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        nonlocal naechster
+        if not naechster.done():
+            naechster.set_result((reader, writer))
+        else:
+            writer.close()
+            await writer.wait_closed()
+
     try:
-        srv_socket = server_erstellen()
+        server = await asyncio.start_server(
+            _handle, konfig.BIND_ADRESSE, port, ssl=tls_kontext_server(),
+        )
     except OSError as fehler:
         logger.error("Server-Socket konnte nicht erstellt werden: %s", fehler)
         cli_ui.info_zeile(f"Port {port} kann nicht gebunden werden. Läuft bereits ein Server?")
         sys.exit(1)
 
     logger.info("Warte auf Verbindungen auf Port %d ...", port)
-    cli_ui.info_zeile(f"Warte auf Client-Verbindung auf Port {port} ...")
-    cli_ui.info_zeile("'quit' eingeben um den Server zu beenden")
-    print()
 
-    try:
+    async with server:
         while True:
-            # Auf Client-Verbindung oder stdin-Eingabe warten (max. 1s)
-            lesbar, _, _ = select.select([srv_socket, sys.stdin], [], [], 1.0)
+            cli_ui.info_zeile(f"Warte auf Client-Verbindung auf Port {port} ...")
+            cli_ui.info_zeile("Ctrl+C zum Beenden des Servers")
+            print()
 
-            if sys.stdin in lesbar:
-                zeile = sys.stdin.readline().strip()
-                if zeile.lower() in ("quit", "exit", "q"):
-                    logger.info("Nutzer hat quit im Lausch-Zustand eingegeben")
-                    cli_ui.info_zeile("Server wird beendet")
-                    sys.exit(0)
+            reader, writer = await naechster
+            naechster = asyncio.get_running_loop().create_future()  # für nächsten Client
 
-            if srv_socket not in lesbar:
-                continue  # Kein Client innerhalb 1s – wieder warten
-
-            try:
-                verbindung, adresse = verbindung_akzeptieren(srv_socket)
-            except KeyboardInterrupt:
-                logger.info("Verbindungsannahme unterbrochen")
-                break
-            except Exception as fehler:
-                logger.error("Fehler beim Akzeptieren der Verbindung: %s", fehler)
-                cli_ui.info_zeile("Verbindungsannahme fehlgeschlagen – beende Server")
-                break
-
+            adresse = writer.get_extra_info("peername")
             logger.info("TCP/TLS-Verbindung von %s akzeptiert", adresse[0])
 
-            # Sitzung direkt im Zustand VERBUNDEN – TCP+TLS haben den Aufbau abgeschlossen
-            sitzung = Sitzung(verbindung, absender_name=name, server_modus=True)
+            sitzung = Sitzung(reader, writer, absender_name=name, server_modus=True)
 
             cli_ui.info_zeile(f"Client verbunden: {adresse[0]}")
             cli_ui.trennlinie()
-            print(f"  Nachrichten eingeben · 'quit' zum Beenden")
+            print("  Nachrichten eingeben · 'quit' zum Beenden")
             cli_ui.trennlinie()
             print()
 
-            trenn_ereignis = threading.Event()  # Signalisiert Ende der Chat-Runde
-            empfangs_thread = threading.Thread(
-                target=_empfangs_schleife,
-                args=(sitzung, trenn_ereignis, "Client"),
-                daemon=True,
-                name="ServerEmpfang",
-            )
-            empfangs_thread.start()
-
-            quit_durch_nutzer = False  # Merker ob Nutzer quit eingegeben hat
-
-            while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
-                try:
-                    eingabe = cli_ui.eingabe_prompt(trenn_ereignis)
-                except (EOFError, KeyboardInterrupt):
-                    break
-                if eingabe is None:  # Verbindung von Gegenseite getrennt
-                    break
-                if not eingabe:
-                    continue
-                if eingabe.lower() in ("quit", "exit", "q"):
-                    quit_durch_nutzer = True
-                    break
-                if not sitzung.nachricht_senden(eingabe):
-                    cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
-                    break
-
-            trenn_ereignis.set()
-            if sitzung.zustand == SitzungsZustand.VERBUNDEN:
-                sitzung.verbindungsabbau()
-            empfangs_thread.join(timeout=2.0)
+            quit_durch_nutzer = await _chat_sitzung_fuehren(sitzung, "Client")
 
             print()
             cli_ui.trennlinie()
             if quit_durch_nutzer:
                 cli_ui.info_zeile("Verbindung beendet · Server wird beendet")
                 cli_ui.trennlinie()
-                sys.exit(0)
+                return
 
             cli_ui.info_zeile("Verbindung beendet · Warte auf nächsten Client")
             cli_ui.trennlinie()
             print()
-
-    finally:
-        srv_socket.close()  # Server-Socket immer schliessen
-        logger.info("Server-Socket geschlossen")
 
     logger.info("Server-Sitzung beendet")
 
@@ -264,11 +245,10 @@ def server_starten(port: int, name: str) -> None:
 # Client-Modus
 # ---------------------------------------------------------------------------
 
-def client_starten(ziel: str, port: int, name: str) -> None:
+async def client_starten(ziel: str, port: int, name: str) -> None:
     """Startet die Anwendung im Client-Modus.
 
-    Verbindet sich einmalig mit dem angegebenen Ziel. Schlägt der Aufbau fehl,
-    wird das Programm beendet.
+    Verbindet sich einmalig mit dem angegebenen Ziel.
 
     Parameter:
         ziel: IP-Adresse oder Hostname des Servers
@@ -282,53 +262,22 @@ def client_starten(ziel: str, port: int, name: str) -> None:
 
     cli_ui.info_zeile(f"Verbinde mit {ziel}:{port} ...")
     try:
-        verbindung = verbindung_herstellen(ziel, port)
+        reader, writer = await verbindung_herstellen(ziel, port)
         logger.info("Verbindung zu %s:%d hergestellt", ziel, port)
     except Exception as fehler:
         logger.error("Verbindungsaufbau zu %s:%d fehlgeschlagen: %s", ziel, port, fehler)
         cli_ui.info_zeile(f"Verbindung zu {ziel}:{port} nicht möglich")
         return
 
-    # Sitzung direkt im Zustand VERBUNDEN – TCP+TLS haben den Aufbau abgeschlossen
-    sitzung = Sitzung(verbindung, absender_name=name, server_modus=False)
+    sitzung = Sitzung(reader, writer, absender_name=name, server_modus=False)
 
     cli_ui.info_zeile(f"Verbunden mit {ziel}:{port}")
     cli_ui.trennlinie()
-    print(f"  Nachrichten eingeben · 'quit' zum Beenden")
+    print("  Nachrichten eingeben · 'quit' zum Beenden")
     cli_ui.trennlinie()
     print()
 
-    trenn_ereignis = threading.Event()  # Signalisiert Ende der Chat-Runde
-    empfangs_thread = threading.Thread(
-        target=_empfangs_schleife,
-        args=(sitzung, trenn_ereignis, "Server"),
-        daemon=True,
-        name="ClientEmpfang",
-    )
-    empfangs_thread.start()
-
-    while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
-        try:
-            eingabe = cli_ui.eingabe_prompt(trenn_ereignis)
-        except (EOFError, KeyboardInterrupt):
-            logger.info("Eingabe unterbrochen – trenne Verbindung")
-            break
-        if eingabe is None:  # Verbindung vom Server getrennt – Programm beenden
-            break
-        if not eingabe:
-            continue
-        if eingabe.lower() in ("quit", "exit", "q"):
-            logger.info("Nutzer hat Verbindungsabbau angefordert")
-            break
-        if not sitzung.nachricht_senden(eingabe):
-            logger.error("Nachricht konnte nicht gesendet werden – Verbindung verloren")
-            cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
-            break
-
-    trenn_ereignis.set()
-    if sitzung.zustand == SitzungsZustand.VERBUNDEN:
-        sitzung.verbindungsabbau()
-    empfangs_thread.join(timeout=2.0)
+    await _chat_sitzung_fuehren(sitzung, "Server")
 
     print()
     cli_ui.trennlinie()
