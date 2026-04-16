@@ -6,6 +6,7 @@ Im Rahmen dieses Projekts wurde künstliche Intelligenz zur Unterstützung bei d
 |-------|----------|--------|-------|
 | 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Unterstützung bei Dokumentation (LIMITIERUNGEN.md, aufgabe6.md, CLAUDE.md) |
 | 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Analyse des Codes auf Limitierungen für Aufgabe #8 |
+| 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Implementierung mTLS (netzwerk.py, konfig.py, zertifikate_erstellen.sh); Aktualisierung LIESMICH.md, LIMITIERUNGEN.md, TECHNISCHE_UEBERSICHT.md |
 
 ## Erklärung
 

@@ -13,13 +13,13 @@ Modul:        Network Security 2026
 
 Verwendung:
     Auto-Modus (Race to Connect) – beide Peers starten gleichzeitig:
-        VM1:  python3 hauptprogramm.py --ziel <IP_VM2> --port 6769
-        VM2:  python3 hauptprogramm.py --ziel <IP_VM1> --port 6769
+        VM1:  python3 src/hauptprogramm.py --ziel <IP_VM2> --port 6769
+        VM2:  python3 src/hauptprogramm.py --ziel <IP_VM1> --port 6769
         Die Server/Client-Rolle wird automatisch bestimmt.
 
     Manueller Modus (rückwärtskompatibel):
-        Server:  python3 hauptprogramm.py --modus server --port 6769
-        Client:  python3 hauptprogramm.py --modus client --ziel 192.168.56.101 --port 6769
+        Server:  python3 src/hauptprogramm.py --modus server --port 6769
+        Client:  python3 src/hauptprogramm.py --modus client --ziel 192.168.56.101 --port 6769
 
     Optionen:
         --ziel    IP-Adresse des anderen Peers (Race-to-Connect-Modus)
@@ -70,10 +70,10 @@ def _argumente_parsen() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Beispiele:\n"
-            "  Auto (empfohlen): VM1: python3 hauptprogramm.py --ziel <IP_VM2>\n"
-            "                    VM2: python3 hauptprogramm.py --ziel <IP_VM1>\n"
-            "  Manuell (Server): python3 hauptprogramm.py --modus server\n"
-            "  Manuell (Client): python3 hauptprogramm.py --modus client --ziel 192.168.56.101"
+            "  Auto (empfohlen): VM1: python3 src/hauptprogramm.py --ziel <IP_VM2>\n"
+            "                    VM2: python3 src/hauptprogramm.py --ziel <IP_VM1>\n"
+            "  Manuell (Server): python3 src/hauptprogramm.py --modus server\n"
+            "  Manuell (Client): python3 src/hauptprogramm.py --modus client --ziel 192.168.56.101"
         ),
     )
     parser.add_argument(

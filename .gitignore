@@ -6,6 +6,9 @@ __pycache__/
 # Logs
 *.log
 
+# TLS – alle Zertifikate und Schlüssel niemals einchecken
+certs/*.pem
+
 # Virtuelle Umgebungen
 .venv/
 venv/
@@ -20,7 +23,6 @@ doku/
 # OS
 .DS_Store
 Thumbs.db
-
 
 # Wireshark-Captures
 *.pcapng

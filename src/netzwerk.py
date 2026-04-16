@@ -48,17 +48,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def tls_kontext_server() -> ssl.SSLContext:
-    """Erstellt den TLS-Kontext für die Server-Seite.
+    """Erstellt den mTLS-Kontext für die Server-Seite.
 
-    Lädt Zertifikat und privaten Schlüssel aus den in konfig.py
-    definierten Pfaden. TLS 1.3 wird als Mindestversion erzwungen.
+    Lädt eigenes Zertifikat/Schlüssel und fordert vom Client ein gültiges,
+    CA-signiertes Zertifikat (CERT_REQUIRED). TLS 1.3 Mindestversion.
 
     Rückgabe:
         Fertig konfigurierter ssl.SSLContext für den Server.
 
     Wirft:
         ssl.SSLError: Bei ungültigem Zertifikat oder Schlüssel.
-        FileNotFoundError: Wenn Zertifikat- oder Schlüsseldatei fehlt.
+        FileNotFoundError: Wenn Zertifikat-, Schlüssel- oder CA-Datei fehlt.
     """
     kontext = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     kontext.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -66,9 +66,12 @@ def tls_kontext_server() -> ssl.SSLContext:
         certfile=str(konfig.ZERTIFIKAT_PFAD),
         keyfile=str(konfig.SCHLUESSEL_PFAD),
     )
+    kontext.verify_mode = ssl.CERT_REQUIRED
+    kontext.load_verify_locations(cafile=str(konfig.CA_ZERTIFIKAT_PFAD))
     logger.debug(
-        "TLS-Server-Kontext erstellt: Zertifikat=%s, min_version=TLSv1.3",
+        "mTLS-Server-Kontext erstellt: Zertifikat=%s, CA=%s, min_version=TLSv1.3",
         konfig.ZERTIFIKAT_PFAD,
+        konfig.CA_ZERTIFIKAT_PFAD,
     )
     return kontext
 
@@ -78,19 +81,32 @@ def tls_kontext_server() -> ssl.SSLContext:
 # ---------------------------------------------------------------------------
 
 def tls_kontext_client() -> ssl.SSLContext:
-    """Erstellt den TLS-Kontext für die Client-Seite.
+    """Erstellt den mTLS-Kontext für die Client-Seite.
 
-    TLS 1.3 wird als Mindestversion erzwungen. Zertifikatsprüfung ist
-    deaktiviert (Self-Signed-Zertifikate in der Entwicklungsumgebung).
+    Präsentiert eigenes CA-signiertes Zertifikat und verifiziert das
+    Server-Zertifikat gegen die CA (CERT_REQUIRED). TLS 1.3 Mindestversion.
+    check_hostname ist deaktiviert, da Peers über IP-Adressen erreichbar sind.
 
     Rückgabe:
         Fertig konfigurierter ssl.SSLContext für den Client.
+
+    Wirft:
+        FileNotFoundError: Wenn Zertifikat-, Schlüssel- oder CA-Datei fehlt.
     """
     kontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     kontext.minimum_version = ssl.TLSVersion.TLSv1_3
+    kontext.load_cert_chain(
+        certfile=str(konfig.ZERTIFIKAT_PFAD),
+        keyfile=str(konfig.SCHLUESSEL_PFAD),
+    )
     kontext.check_hostname = False
-    kontext.verify_mode = ssl.CERT_NONE
-    logger.debug("TLS-Client-Kontext erstellt: verify_mode=CERT_NONE, min_version=TLSv1.3")
+    kontext.verify_mode = ssl.CERT_REQUIRED
+    kontext.load_verify_locations(cafile=str(konfig.CA_ZERTIFIKAT_PFAD))
+    logger.debug(
+        "mTLS-Client-Kontext erstellt: Zertifikat=%s, CA=%s, min_version=TLSv1.3",
+        konfig.ZERTIFIKAT_PFAD,
+        konfig.CA_ZERTIFIKAT_PFAD,
+    )
     return kontext
 
 

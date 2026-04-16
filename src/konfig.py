@@ -23,10 +23,12 @@ RACE_TIMEOUT: float = 15.0           # Gesamtwartezeit Race-to-Connect (Sekunden
 RACE_CLIENT_VERZOEGERUNG: float = 0.3  # Verzögerung des Client-Threads im Race (Sekunden)
 
 # ---------------------------------------------------------------------------
-# TLS
+# TLS (mTLS – gegenseitige Authentifizierung)
 # ---------------------------------------------------------------------------
-ZERTIFIKAT_PFAD: pathlib.Path = pathlib.Path(__file__).parent / "zertifikat.pem"
-SCHLUESSEL_PFAD: pathlib.Path = pathlib.Path(__file__).parent / "schluessel.pem"
+_PROJEKT_WURZEL: pathlib.Path = pathlib.Path(__file__).parent.parent
+ZERTIFIKAT_PFAD: pathlib.Path = _PROJEKT_WURZEL / "certs" / "zertifikat.pem"
+SCHLUESSEL_PFAD: pathlib.Path = _PROJEKT_WURZEL / "certs" / "schluessel.pem"
+CA_ZERTIFIKAT_PFAD: pathlib.Path = _PROJEKT_WURZEL / "certs" / "ca_zertifikat.pem"
 
 # ---------------------------------------------------------------------------
 # Logging

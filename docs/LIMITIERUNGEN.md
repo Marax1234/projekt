@@ -20,19 +20,7 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 
 ---
 
-## 3. Self-Signed-Zertifikat ohne CA-Verifikation
-
-**Beschreibung:** Der Client prüft das Server-Zertifikat nicht gegen eine vertrauenswürdige Zertifizierungsstelle.  
-**Ursache:** `netzwerk.py` – `tls_kontext_client()`:
-```python
-kontext.check_hostname = False
-kontext.verify_mode = ssl.CERT_NONE
-```
-**Auswirkung:** Man-in-the-Middle-Angriffe sind in offenen Netzwerken möglich. Der Einsatz ist auf geschlossene, kontrollierte Umgebungen (z. B. VirtualBox Internal Network) beschränkt.
-
----
-
-## 4. Kein persistenter Nachrichtenspeicher
+## 3. Kein persistenter Nachrichtenspeicher
 
 **Beschreibung:** Der Chat-Verlauf wird ausschließlich im RAM gehalten.  
 **Ursache:** `sitzung.py` speichert keine gesendeten oder empfangenen Nachrichten; `cli_ui.py` gibt sie nur auf der Konsole aus.  
@@ -40,7 +28,7 @@ kontext.verify_mode = ssl.CERT_NONE
 
 ---
 
-## 5. Kein NAT-Traversal
+## 4. Kein NAT-Traversal
 
 **Beschreibung:** Beide Peers müssen direkt über IP erreichbar sein.  
 **Ursache:** `netzwerk.py` verwendet direkte TCP-Verbindungen (`socket.connect`); es existieren keine STUN-, TURN- oder Hole-Punching-Mechanismen.  
@@ -48,7 +36,7 @@ kontext.verify_mode = ssl.CERT_NONE
 
 ---
 
-## 6. Fehlendes Nachrichten-Framing (Pufferlimit)
+## 5. Fehlendes Nachrichten-Framing (Pufferlimit)
 
 **Beschreibung:** Das Protokoll besitzt kein Framing (weder Length-Prefix noch Delimiter). Pro Empfangsaufruf werden maximal 4 096 Bytes gelesen.  
 **Ursache:** `netzwerk.py` – `daten_empfangen()` – ein einziger `recv(konfig.PUFFER_GROESSE)`-Aufruf ohne Reassemblierung; `konfig.py` – `PUFFER_GROESSE = 4096`.  
@@ -56,7 +44,7 @@ kontext.verify_mode = ssl.CERT_NONE
 
 ---
 
-## 7. Nur IPv4
+## 6. Nur IPv4
 
 **Beschreibung:** Das System unterstützt ausschließlich IPv4.  
 **Ursache:** `netzwerk.py:117` und `:214` – `socket.AF_INET` ist fest kodiert.  
@@ -64,7 +52,7 @@ kontext.verify_mode = ssl.CERT_NONE
 
 ---
 
-## 8. Eingeschränkter Wiederverbindungsmechanismus
+## 7. Eingeschränkter Wiederverbindungsmechanismus
 
 **Beschreibung:** Nach einem Verbindungsabbruch gibt es keine automatische Wiederverbindung.  
 **Ursache:** `sitzung.py:196` – bei `ConnectionError` wird der Zustand auf `GETRENNT` gesetzt und die Empfangsschleife beendet. Der Server wartet dank `while True`-Schleife (`konsole.py:91`) auf den nächsten Client — der Client ist jedoch one-shot und beendet sich.  
@@ -72,16 +60,16 @@ kontext.verify_mode = ssl.CERT_NONE
 
 ---
 
-## 9. Keine gegenseitige TLS-Authentifizierung (kein mTLS)
-
-**Beschreibung:** Nur der Server präsentiert ein Zertifikat; der Client authentifiziert sich nicht.  
-**Ursache:** `netzwerk.py` – `tls_kontext_client()` lädt kein eigenes Zertifikat (`load_cert_chain` fehlt auf Client-Seite); `tls_kontext_server()` setzt kein `verify_mode = ssl.CERT_REQUIRED` und fordert daher kein Client-Zertifikat an.  
-**Auswirkung:** Die Identität des Clients ist nicht verifizierbar. Ein beliebiger Dritter, der den Port erreicht, kann sich als gültiger Chat-Peer verbinden.
-
----
-
-## 10. Kein Nachrichtenformat-Versioning
+## 8. Kein Nachrichtenformat-Versioning
 
 **Beschreibung:** Das JSON-Protokoll enthält keine Versionsnummer.  
 **Ursache:** Das Payload-Format (`nachricht`, `zeitstempel`, `absender`) ist fest in `sitzung.py:123–127` kodiert.  
 **Auswirkung:** Zukünftige Protokollerweiterungen sind nicht rückwärtskompatibel; beide Peers müssen stets dieselbe Version verwenden.
+
+---
+
+## 9. Kein App-Level-Handshake nach TLS
+
+**Beschreibung:** Nach dem mTLS-Handshake gibt es keine Bestätigung auf Anwendungsebene, dass beide Seiten die Verbindung als aktiv betrachten.  
+**Ursache:** `sitzung.py` setzt den Zustand direkt auf `VERBUNDEN` ohne einen Ping/Pong-Austausch. Ein Verbindungsabbruch zwischen TLS-Handshake und erstem `read()`/`write()` wird erst beim ersten Sendeversuch bemerkt.  
+**Auswirkung:** In seltenen Randbedingungen (z. B. Netzwerkunterbrechung exakt nach dem Handshake) erscheint die Verbindung kurz als verbunden, obwohl sie bereits tot ist.
