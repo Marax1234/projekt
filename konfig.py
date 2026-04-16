@@ -19,6 +19,8 @@ VERBINDUNGS_TIMEOUT: float = 10.0    # Sekunden bis Verbindungsaufbau abbricht
 EMPFANG_TIMEOUT: float = 30.0        # Sekunden bis Empfangs-Timeout
 SENDE_TIMEOUT: float = 10.0          # Sekunden bis Sende-Timeout
 MAX_VERBINDUNGEN: int = 1            # Maximale gleichzeitige Verbindungen (P2P = 1)
+RACE_TIMEOUT: float = 15.0           # Gesamtwartezeit Race-to-Connect (Sekunden)
+RACE_CLIENT_VERZOEGERUNG: float = 0.3  # Verzögerung des Client-Threads im Race (Sekunden)
 
 # ---------------------------------------------------------------------------
 # TLS
@@ -32,15 +34,6 @@ SCHLUESSEL_PFAD: pathlib.Path = pathlib.Path(__file__).parent / "schluessel.pem"
 LOG_LEVEL: str = "WARNING"              # Standard-Log-Level (DEBUG, INFO, WARNING, ERROR)
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_DATEINAME: str = "p2pchat.log"   # Log-Datei im Projektverzeichnis
-
-# ---------------------------------------------------------------------------
-# GUI
-# ---------------------------------------------------------------------------
-FENSTER_TITEL: str = "P2P Chat – NetSec 2026"
-FENSTER_BREITE: int = 800
-FENSTER_HOEHE: int = 600
-SCHRIFTART: tuple = ("Courier", 11)  # Monospace-Schrift für Chat-Verlauf
-GUI_QUEUE_INTERVALL: int = 100       # Millisekunden für root.after() Queue-Polling
 
 # ---------------------------------------------------------------------------
 # Anwendung

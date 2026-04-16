@@ -1,7 +1,7 @@
 # P2P Chat – Startanleitung
 
 **Kurs:** Network Security 2026 | **Gruppe 2**
-**Protokoll:** P2PChat v1.0 | **Port:** 6769 | **TLS**
+**Protokoll:** P2PChat v1.0 | **Port:** 6769 | **TLS 1.3**
 
 ---
 
@@ -14,21 +14,21 @@
 
 ---
 
-## Zertifikat generieren (einmalig, auf VM1/Server)
+## Zertifikat generieren (einmalig, auf jeder VM)
+
+Da im Race-to-Connect-Modus jede VM die Server-Rolle übernehmen kann,
+braucht **jede VM ihr eigenes Schlüsselpaar** (`zertifikat.pem` + `schluessel.pem`).
 
 ```bash
+# Auf VM1 UND auf VM2 jeweils ausführen:
 openssl req -x509 -newkey rsa:4096 -keyout schluessel.pem \
   -out zertifikat.pem -days 365 -nodes \
   -subj "/CN=P2PChat/O=NetSec2026"
 ```
 
-**Wichtig:** Das `zertifikat.pem` muss auf **beide VMs** kopiert werden.
-Der private Schluessel `schluessel.pem` bleibt **nur auf VM1** (Server-Seite).
-
-```bash
-# Zertifikat auf VM2 kopieren (Beispiel mit scp):
-scp zertifikat.pem benutzer@<IP_VM2>:/pfad/zum/projekt/
-```
+**Hinweis:** Da der Client die Zertifikatsprüfung deaktiviert hat
+(`CERT_NONE`), können beide VMs unterschiedliche Self-Signed-Zertifikate
+verwenden – kein gegenseitiger Austausch erforderlich.
 
 Zertifikat pruefen:
 ```bash
@@ -39,23 +39,22 @@ openssl x509 -in zertifikat.pem -noout -text | grep -E "Subject:|Validity"
 
 ## Starten
 
-### GUI-Modus (empfohlen)
+### Auto-Modus – Race to Connect (empfohlen)
 
-**VM1 und VM2 – jeweils:**
+**VM1 (z. B. IP 192.168.56.101):**
 ```bash
-cd /pfad/zum/projekt
-python3 hauptprogramm.py --gui
+python3 hauptprogramm.py --ziel 192.168.56.102 --port 6769
 ```
 
-Der Startdialog fragt ab:
-- **Modus:** Server (VM1 – wartet) oder Client (VM2 – verbindet)
-- **Server-IP:** IP-Adresse von VM1 (nur im Client-Modus)
-- **Port:** Standard 6769
-- **Anzeigename:** Frei waehlbar (erscheint im Chat)
+**VM2 (z. B. IP 192.168.56.102):**
+```bash
+python3 hauptprogramm.py --ziel 192.168.56.101 --port 6769
+```
 
-**Reihenfolge:** Erst VM1 (Server) starten, dann VM2 (Client).
+Beide Peers starten gleichzeitig. Die Rolle (Server/Client) wird
+automatisch bestimmt und ausgegeben.
 
-### Konsolenmodus
+### Manueller Modus (rückwärtskompatibel)
 
 **VM1 – Server:**
 ```bash
@@ -69,7 +68,7 @@ python3 hauptprogramm.py --modus client --ziel <IP_VON_VM1> --port 6769
 
 **Optionale Parameter:**
 ```
---name    <name>    Anzeigename im Chat (Standard: "Server" oder "Client")
+--name    <name>    Anzeigename im Chat (Standard: "Peer", "Server" oder "Client")
 --debug             DEBUG-Log-Level aktivieren (ausfuehrliche Ausgabe)
 ```
 
@@ -103,7 +102,8 @@ tshark -i eth0 -f "tcp port 6769" -Y "tls.handshake"
 tshark -i eth0 -f "tcp port 6769" -w capture.pcapng
 
 # In Wireshark: Analyze → Expert Information zeigt TLS Cipher Suite
-# Erwartung: TLS-Handshake sichtbar, Payload verschluesselt
+# Erwartung: TLS 1.3-Handshake sichtbar (Record Version: TLS 1.3), Payload verschluesselt
+# TLS-Version pruefen: tshark -i eth0 -Y "tls.record.version == 0x0304"
 ```
 
 ---
@@ -117,7 +117,7 @@ Die Anwendung schreibt alle Ereignisse in `p2pchat.log` (im Projektverzeichnis):
 tail -f p2pchat.log
 
 # Log-Level erhoehen (DEBUG zeigt Nachrichtendetails):
-python3 hauptprogramm.py --gui --debug
+python3 hauptprogramm.py --ziel <IP> --debug
 ```
 
 Log-Phasen:
@@ -138,21 +138,23 @@ und `absender` als UTF-8-codierte Bytes direkt ueber den TLS-Kanal uebertragen.
 ```
 
 **Sicherheit:**
-- **Vertraulichkeit & Integritaet:** TLS (AEAD-Verschluesselung) – gesamter Kanal verschluesselt und integritaetsgesichert
+- **Vertraulichkeit & Integritaet:** TLS 1.3 (AEAD-Verschluesselung) – gesamter Kanal verschluesselt und integritaetsgesichert
+- **TLS-Mindestversion:** TLS 1.3 wird serverseitig und clientseitig erzwungen (`minimum_version = TLSv1_3`). Verbindungsversuche mit TLS 1.2 oder aelter werden abgelehnt.
 
 ---
 
 ## Projektstruktur
 
-| Datei              | Beschreibung                              |
-|--------------------|-------------------------------------------|
-| `konfig.py`        | Alle Konstanten (Port, Timeouts, Pfade)   |
-| `netzwerk.py`      | TCP/TLS-Verbindungsverwaltung             |
-| `sitzung.py`       | Sitzungslebenszyklus, Nachrichten senden/empfangen |
-| `gui.py`           | Tkinter-Oberflaeche (Dark Mode)           |
-| `hauptprogramm.py` | Einstiegspunkt, argparse, Orchestrierung  |
-| `zertifikat.pem`   | Self-Signed TLS-Zertifikat                |
-| `schluessel.pem`   | Privater TLS-Schluessel (nur Server)      |
+| Datei              | Beschreibung                                              |
+|--------------------|-----------------------------------------------------------|
+| `konfig.py`        | Alle Konstanten (Port, Timeouts, Race-Parameter, Pfade)   |
+| `netzwerk.py`      | TCP/TLS-Verbindungsverwaltung + `auto_verbinden()`        |
+| `sitzung.py`       | Sitzungslebenszyklus, Nachrichten senden/empfangen        |
+| `konsole.py`       | Konsolenbetrieb: `peer_starten()`, `server_starten()`, `client_starten()` |
+| `cli_ui.py`        | Terminal-UI (Banner, Box-Chars, Prompt)                   |
+| `hauptprogramm.py` | Einstiegspunkt, argparse, Orchestrierung                  |
+| `zertifikat.pem`   | Self-Signed TLS-Zertifikat (auf jeder VM generieren)      |
+| `schluessel.pem`   | Privater TLS-Schluessel (auf jeder VM generieren)         |
 
 ---
 
@@ -161,6 +163,5 @@ und `absender` als UTF-8-codierte Bytes direkt ueber den TLS-Kanal uebertragen.
 | Problem                          | Loesung                                             |
 |----------------------------------|-----------------------------------------------------|
 | `Port already in use`            | `sudo lsof -i :6769` – alten Prozess beenden        |
-| `SSL: CERTIFICATE_VERIFY_FAILED` | `zertifikat.pem` fehlt auf Client-VM                |
-| `Connection refused`             | Server noch nicht gestartet oder IP falsch          |
-| GUI startet nicht                | `python3 -c "import tkinter"` – tkinter pruefen     |
+| `SSL: CERTIFICATE_VERIFY_FAILED` | `zertifikat.pem` oder `schluessel.pem` fehlt        |
+| Keine Verbindung nach 15 s       | IP falsch, Port blockiert oder beide im Client-Try  |

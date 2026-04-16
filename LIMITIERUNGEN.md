@@ -23,7 +23,7 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 ## 3. Self-Signed-Zertifikat ohne CA-Verifikation
 
 **Beschreibung:** Der Client prüft das Server-Zertifikat nicht gegen eine vertrauenswürdige Zertifizierungsstelle.  
-**Ursache:** `netzwerk.py:93–94`:
+**Ursache:** `netzwerk.py` – `tls_kontext_client()`:
 ```python
 kontext.check_hostname = False
 kontext.verify_mode = ssl.CERT_NONE
@@ -34,8 +34,8 @@ kontext.verify_mode = ssl.CERT_NONE
 
 ## 4. Kein persistenter Nachrichtenspeicher
 
-**Beschreibung:** Der Chat-Verlauf wird ausschließlich im RAM der GUI gehalten.  
-**Ursache:** `gui.py` schreibt Nachrichten nur in das Tkinter-Textwidget; `sitzung.py` speichert keine gesendeten oder empfangenen Nachrichten.  
+**Beschreibung:** Der Chat-Verlauf wird ausschließlich im RAM gehalten.  
+**Ursache:** `sitzung.py` speichert keine gesendeten oder empfangenen Nachrichten; `cli_ui.py` gibt sie nur auf der Konsole aus.  
 **Auswirkung:** Nach Verbindungsabbau oder Programmende ist der gesamte Verlauf unwiderruflich verloren.
 
 ---
@@ -51,7 +51,7 @@ kontext.verify_mode = ssl.CERT_NONE
 ## 6. Fehlendes Nachrichten-Framing (Pufferlimit)
 
 **Beschreibung:** Das Protokoll besitzt kein Framing (weder Length-Prefix noch Delimiter). Pro Empfangsaufruf werden maximal 4 096 Bytes gelesen.  
-**Ursache:** `netzwerk.py:302` – ein einziger `recv(konfig.PUFFER_GROESSE)`-Aufruf ohne Reassemblierung; `konfig.py:49` – `PUFFER_GROESSE = 4096`.  
+**Ursache:** `netzwerk.py` – `daten_empfangen()` – ein einziger `recv(konfig.PUFFER_GROESSE)`-Aufruf ohne Reassemblierung; `konfig.py` – `PUFFER_GROESSE = 4096`.  
 **Auswirkung:** Da TCP ein Datenstrom ist, kann `recv()` unabhängig von der Nachrichtengröße ein partielles Fragment zurückgeben — der JSON-Parser schlägt dann mit `json.JSONDecodeError` fehl. Nachrichten, deren JSON-Repräsentation 4 096 Bytes überschreitet, werden zusätzlich hart abgeschnitten.
 
 ---
@@ -67,15 +67,15 @@ kontext.verify_mode = ssl.CERT_NONE
 ## 8. Eingeschränkter Wiederverbindungsmechanismus
 
 **Beschreibung:** Nach einem Verbindungsabbruch gibt es keine automatische Wiederverbindung.  
-**Ursache:** `sitzung.py:196` – bei `ConnectionError` wird der Zustand auf `GETRENNT` gesetzt und die Empfangsschleife beendet. Im Konsolenmodus wartet der Server dank `while True`-Schleife (`konsole.py:91`) auf den nächsten Client — der Client ist jedoch one-shot und beendet sich. Im GUI-Modus erscheint der Verbindungsdialog nur einmalig beim Start; nach Verbindungsabbau gibt es für beide Seiten keine Möglichkeit zur Neuverbindung ohne Neustart der Anwendung.  
-**Auswirkung:** Kurze Netzwerkunterbrechungen beenden die Client-Sitzung endgültig; im GUI-Modus gilt das auch für den Server.
+**Ursache:** `sitzung.py:196` – bei `ConnectionError` wird der Zustand auf `GETRENNT` gesetzt und die Empfangsschleife beendet. Der Server wartet dank `while True`-Schleife (`konsole.py:91`) auf den nächsten Client — der Client ist jedoch one-shot und beendet sich.  
+**Auswirkung:** Kurze Netzwerkunterbrechungen beenden die Client-Sitzung endgültig; ein Neustart der Anwendung ist erforderlich.
 
 ---
 
 ## 9. Keine gegenseitige TLS-Authentifizierung (kein mTLS)
 
 **Beschreibung:** Nur der Server präsentiert ein Zertifikat; der Client authentifiziert sich nicht.  
-**Ursache:** `netzwerk.py:80–97` – der Client-TLS-Kontext lädt kein eigenes Zertifikat (`load_cert_chain` fehlt auf Client-Seite); `netzwerk.py:47–73` – der Server-Kontext setzt kein `verify_mode = ssl.CERT_REQUIRED` und fordert daher kein Client-Zertifikat an.  
+**Ursache:** `netzwerk.py` – `tls_kontext_client()` lädt kein eigenes Zertifikat (`load_cert_chain` fehlt auf Client-Seite); `tls_kontext_server()` setzt kein `verify_mode = ssl.CERT_REQUIRED` und fordert daher kein Client-Zertifikat an.  
 **Auswirkung:** Die Identität des Clients ist nicht verifizierbar. Ein beliebiger Dritter, der den Port erreicht, kann sich als gültiger Chat-Peer verbinden.
 
 ---

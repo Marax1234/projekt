@@ -17,7 +17,7 @@ import sys
 import threading
 
 import cli_ui
-from netzwerk import server_erstellen, verbindung_akzeptieren, verbindung_herstellen
+from netzwerk import auto_verbinden, server_erstellen, verbindung_akzeptieren, verbindung_herstellen
 from sitzung import Sitzung, SitzungsZustand
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,93 @@ def _empfangs_schleife(sitzung: Sitzung, trenn_ereignis: threading.Event, herkun
         cli_ui.nachricht_ausgeben(absender, text, zeitstempel)
         logger.info("[%s] %s: %s", zeitstempel, absender, text)
     trenn_ereignis.set()
+
+
+# ---------------------------------------------------------------------------
+# Auto-Modus (Race to Connect) – keine manuelle Rollenwahl
+# ---------------------------------------------------------------------------
+
+def peer_starten(ziel: str, port: int, name: str) -> None:
+    """Startet die Anwendung im Race-to-Connect-Modus.
+
+    Beide Peers starten mit der IP des jeweils anderen Peers als --ziel.
+    Die Server/Client-Rolle wird automatisch durch „Race to Connect"
+    bestimmt: wer zuerst eine Verbindung akzeptiert oder herstellt, gewinnt.
+
+    Parameter:
+        ziel: IP-Adresse des anderen Peers
+        port: TCP-Port (wird für Server-Bind und Client-Connect verwendet)
+        name: Anzeigename für Log-Ausgaben und Nachrichten
+    """
+    cli_ui.banner_anzeigen()
+    print()
+    cli_ui.status_box("auto", port, name)
+    print()
+
+    cli_ui.info_zeile(f"Race to Connect mit {ziel}:{port} ...")
+    cli_ui.info_zeile("Warte auf Verbindung oder verbinde – Rolle wird automatisch bestimmt")
+    print()
+
+    try:
+        verbindung, ist_server = auto_verbinden(ziel, port)
+    except ConnectionError as fehler:
+        logger.error("Race-to-Connect fehlgeschlagen: %s", fehler)
+        cli_ui.info_zeile(f"Keine Verbindung zu {ziel}:{port} – Timeout überschritten")
+        return
+    except Exception as fehler:
+        logger.error("Unerwarteter Fehler beim Race-to-Connect: %s", fehler)
+        cli_ui.info_zeile(f"Verbindungsaufbau fehlgeschlagen: {fehler}")
+        return
+
+    rolle = "Server" if ist_server else "Client"
+    logger.info("Verbunden als %s mit %s:%d", rolle, ziel, port)
+
+    sitzung = Sitzung(verbindung, absender_name=name, server_modus=ist_server)
+
+    cli_ui.info_zeile(f"Verbunden als {rolle} mit {ziel}:{port}")
+    cli_ui.trennlinie()
+    print(f"  Nachrichten eingeben · 'quit' zum Beenden")
+    cli_ui.trennlinie()
+    print()
+
+    trenn_ereignis = threading.Event()
+    empfangs_thread = threading.Thread(
+        target=_empfangs_schleife,
+        args=(sitzung, trenn_ereignis, "Peer"),
+        daemon=True,
+        name="PeerEmpfang",
+    )
+    empfangs_thread.start()
+
+    while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
+        try:
+            eingabe = cli_ui.eingabe_prompt(trenn_ereignis)
+        except (EOFError, KeyboardInterrupt):
+            logger.info("Eingabe unterbrochen – trenne Verbindung")
+            break
+        if eingabe is None:
+            break
+        if not eingabe:
+            continue
+        if eingabe.lower() in ("quit", "exit", "q"):
+            logger.info("Nutzer hat Verbindungsabbau angefordert")
+            break
+        if not sitzung.nachricht_senden(eingabe):
+            logger.error("Nachricht konnte nicht gesendet werden – Verbindung verloren")
+            cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
+            break
+
+    trenn_ereignis.set()
+    if sitzung.zustand == SitzungsZustand.VERBUNDEN:
+        sitzung.verbindungsabbau()
+    empfangs_thread.join(timeout=2.0)
+
+    print()
+    cli_ui.trennlinie()
+    cli_ui.info_zeile("Verbindung beendet")
+    cli_ui.trennlinie()
+
+    logger.info("Peer-Sitzung beendet")
 
 
 # ---------------------------------------------------------------------------

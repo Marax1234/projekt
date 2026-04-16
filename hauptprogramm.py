@@ -3,32 +3,30 @@ hauptprogramm.py – Entry-Point, argparse, Orchestrierung
 
 Beschreibung: Einstiegspunkt der Anwendung. Parst Kommandozeilenargumente,
               initialisiert Logging, registriert Signal-Handler und startet
-              die Anwendung im GUI-, Server- oder Client-Modus.
+              die Anwendung im Konsolenmodus.
 
-              Konsolenbetrieb:  konsole.py  (server_starten / client_starten)
+              Konsolenbetrieb:  konsole.py  (peer_starten / server_starten / client_starten)
               Terminal-UI:      cli_ui.py   (Box-Chars, figlet-Banner)
-              Grafische UI:     gui.py      (Tkinter, nur mit --gui geladen)
 
 Autor:        Gruppe 2
 Datum:        2026-03-26
 Modul:        Network Security 2026
 
 Verwendung:
-    GUI-Modus (empfohlen):
-        python3 hauptprogramm.py --gui
+    Auto-Modus (Race to Connect) – beide Peers starten gleichzeitig:
+        VM1:  python3 hauptprogramm.py --ziel <IP_VM2> --port 6769
+        VM2:  python3 hauptprogramm.py --ziel <IP_VM1> --port 6769
+        Die Server/Client-Rolle wird automatisch bestimmt.
 
-    Server (Konsolenmodus):
-        python3 hauptprogramm.py --modus server --port 6769
-
-    Client (Konsolenmodus):
-        python3 hauptprogramm.py --modus client --ziel 192.168.56.101 --port 6769
+    Manueller Modus (rückwärtskompatibel):
+        Server:  python3 hauptprogramm.py --modus server --port 6769
+        Client:  python3 hauptprogramm.py --modus client --ziel 192.168.56.101 --port 6769
 
     Optionen:
-        --gui     Startet die Tkinter-GUI (kein --modus erforderlich)
-        --modus   server|client  (Pflichtangabe im Konsolenmodus)
-        --ziel    IP-Adresse     (nur Client, Pflichtangabe im Client-Modus)
+        --ziel    IP-Adresse des anderen Peers (Race-to-Connect-Modus)
+        --modus   server|client  (manueller Modus, rückwärtskompatibel)
         --port    TCP-Port       (Standard: 6769)
-        --name    Anzeigename    (Standard: "Server" oder "Client")
+        --name    Anzeigename    (Standard: "Peer", "Server" oder "Client")
         --debug   DEBUG-Logging  (Standard: INFO)
 """
 
@@ -38,6 +36,7 @@ import sys
 
 import konfig
 import konsole
+from konsole import peer_starten
 
 logger = logging.getLogger(__name__)
 
@@ -76,28 +75,30 @@ def _argumente_parsen() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Beispiele:\n"
-            "  Server:  python3 hauptprogramm.py --modus server --port 6769\n"
-            "  Client:  python3 hauptprogramm.py --modus client --ziel 192.168.56.101 --port 6769"
+            "  Auto (empfohlen): VM1: python3 hauptprogramm.py --ziel <IP_VM2>\n"
+            "                    VM2: python3 hauptprogramm.py --ziel <IP_VM1>\n"
+            "  Manuell (Server): python3 hauptprogramm.py --modus server\n"
+            "  Manuell (Client): python3 hauptprogramm.py --modus client --ziel 192.168.56.101"
         ),
     )
     parser.add_argument(
-        "--gui",
-        action="store_true",
-        default=False,
-        help="Startet die grafische Tkinter-Oberfläche (--modus nicht erforderlich)",
+        "--ziel",
+        metavar="IP",
+        default=None,
+        help=(
+            "IP-Adresse des anderen Peers. Im Auto-Modus (ohne --modus) starten "
+            "beide Peers gleichzeitig mit der IP des jeweils anderen."
+        ),
     )
     parser.add_argument(
         "--modus",
         choices=["server", "client"],
         required=False,
         default=None,
-        help="Betriebsmodus: 'server' lauscht auf Verbindungen, 'client' verbindet sich",
-    )
-    parser.add_argument(
-        "--ziel",
-        metavar="IP",
-        default=None,
-        help="Ziel-IP-Adresse des Servers (nur im Client-Modus erforderlich)",
+        help=(
+            "Optionaler manueller Modus (rückwärtskompatibel): "
+            "'server' lauscht, 'client' verbindet. Ohne --modus: Race-to-Connect."
+        ),
     )
     parser.add_argument(
         "--port",
@@ -108,7 +109,7 @@ def _argumente_parsen() -> argparse.Namespace:
     parser.add_argument(
         "--name",
         default=None,
-        help="Anzeigename für diesen Peer (Standard: 'Server' oder 'Client')",
+        help="Anzeigename für diesen Peer (Standard: 'Peer', 'Server' oder 'Client')",
     )
     parser.add_argument(
         "--debug",
@@ -120,42 +121,39 @@ def _argumente_parsen() -> argparse.Namespace:
 
 
 # ---------------------------------------------------------------------------
-# GUI-Start (lazy import – tkinter nur laden wenn wirklich benötigt)
-# ---------------------------------------------------------------------------
-
-def _gui_starten() -> None:
-    """Startet die grafische Tkinter-Oberfläche."""
-    try:
-        from gui import gui_starten
-        gui_starten()
-    except ImportError as fehler:
-        logger.error("GUI-Modul konnte nicht geladen werden: %s", fehler)
-        print("GUI nicht verfügbar – tkinter möglicherweise nicht installiert.")
-        sys.exit(1)
-
-
-# ---------------------------------------------------------------------------
 # Einstiegspunkt
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    """Parst Argumente, initialisiert Logging, registriert Signal-Handler
-    und startet den gewählten Modus (GUI oder Konsole)."""
+    """Parst Argumente, initialisiert Logging und startet den gewählten Modus.
+
+    Priorisierung:
+        1. --ziel ohne --modus → Race-to-Connect (Auto-Modus, empfohlen)
+        2. --modus server/client → manueller Modus (rückwärtskompatibel)
+    """
     args = _argumente_parsen()
 
     log_level = "DEBUG" if args.debug else konfig.LOG_LEVEL
     _logging_initialisieren(log_level)
 
-    # GUI-Modus hat Vorrang
-    if args.gui:
-        logger.info("Starte P2P-Chat im GUI-Modus (Port: %d)", args.port)
-        _gui_starten()
+    # 1. Auto-Modus (Race to Connect): --ziel angegeben, kein --modus
+    if args.ziel and not args.modus:
+        name = args.name or "Peer"
+        logger.info(
+            "Starte P2P-Chat im Auto-Modus (Ziel: %s, Name: %s, Port: %d)",
+            args.ziel, name, args.port,
+        )
+        peer_starten(args.ziel, args.port, name)
         return
 
-    # Konsolenmodus: --modus ist Pflichtangabe
+    # 2. Manueller Modus (rückwärtskompatibel): --modus server|client
     if not args.modus:
-        logger.error("--modus (server|client) oder --gui ist erforderlich")
-        print("Fehler: --modus server|client angeben oder --gui für die GUI nutzen.")
+        logger.error("Kein Modus angegeben: --ziel IP oder --modus server|client")
+        print(
+            "Fehler: Bitte angeben:\n"
+            "  Auto-Modus:  --ziel <IP_des_anderen_Peers>\n"
+            "  Manuell:     --modus server|client"
+        )
         sys.exit(1)
 
     if args.modus == "client" and not args.ziel:
@@ -165,7 +163,7 @@ def main() -> None:
 
     name = args.name or ("Server" if args.modus == "server" else "Client")
     logger.info(
-        "Starte P2P-Chat im %s-Modus (Name: %s, Port: %d)",
+        "Starte P2P-Chat im manuellen %s-Modus (Name: %s, Port: %d)",
         args.modus.upper(), name, args.port,
     )
 
