@@ -6,8 +6,12 @@ Beschreibung: Enthält die Startfunktionen für den interaktiven Konsolenbetrieb
               verbindet sich einmalig mit dem angegebenen Ziel. Beide nutzen
               cli_ui.py für die Terminal-Ausgabe.
 
+              Nach TLS-Verbindungsaufbau führt Sitzung.verbinden() den
+              App-Handshake (HELLO/HELLO_ACK) durch, bevor Chat-Nachrichten
+              gesendet oder empfangen werden.
+
 Autor:        Gruppe 2
-Datum:        2026-03-26
+Datum:        2026-04-16
 Modul:        Network Security 2026
 """
 
@@ -19,7 +23,7 @@ import threading
 import cli_ui
 import konfig
 from netzwerk import auto_verbinden, tls_kontext_server, verbindung_herstellen
-from sitzung import Sitzung, SitzungsZustand
+from sitzung import Sitzung
 
 logger = logging.getLogger(__name__)
 
@@ -29,24 +33,26 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 async def _empfangs_schleife(sitzung: Sitzung, herkunft: str) -> None:
-    """Empfängt Nachrichten als async Task.
+    """Liest CHAT-Nachrichten aus der UI-Queue und gibt sie auf dem Terminal aus.
 
-    Läuft solange die Sitzung aktiv ist. Bei Verbindungsabbruch setzt
-    nachricht_empfangen den Zustand auf GETRENNT, woraufhin die Schleife endet.
+    Läuft als asyncio Task. Beendet sich wenn die Sitzung None in die Queue
+    schreibt (Verbindungsende oder Fehler).
 
     Parameter:
         sitzung:  Aktive Sitzung
         herkunft: Bezeichnung der Gegenseite für Meldungen (z.B. "Client")
     """
-    while sitzung.zustand == SitzungsZustand.VERBUNDEN:
-        nachricht = await sitzung.nachricht_empfangen()
-        if nachricht is None:
-            if sitzung.zustand != SitzungsZustand.VERBUNDEN:
+    while True:
+        frame = await sitzung.naechste_chat_nachricht()
+        if frame is None:
+            if not sitzung.ist_aktiv:
                 cli_ui.info_zeile(f"Verbindung vom {herkunft} beendet")
             return
-        absender    = nachricht.get("absender", "Unbekannt")
-        zeitstempel = nachricht.get("zeitstempel", "")
-        text        = nachricht.get("nachricht", "")
+
+        payload     = frame.get("payload", {})
+        absender    = payload.get("sender", "Unbekannt")
+        text        = payload.get("text", "")
+        zeitstempel = frame.get("timestamp", "")
         cli_ui.nachricht_ausgeben(absender, text, zeitstempel)
         logger.info("[%s] %s: %s", zeitstempel, absender, text)
 
@@ -63,7 +69,7 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
     threading.Event) vermittelt zuverlässig, wenn die Gegenseite trennt.
 
     Parameter:
-        sitzung:  Aktive Sitzung
+        sitzung:  Aktive Sitzung (muss sich bereits im Zustand BEREIT befinden)
         herkunft: Bezeichnung der Gegenseite (z.B. "Client", "Server", "Peer")
 
     Rückgabe:
@@ -80,7 +86,7 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
     empfang_task = asyncio.create_task(_empfang_mit_signal())
 
     try:
-        while sitzung.zustand == SitzungsZustand.VERBUNDEN and not trenn_ereignis.is_set():
+        while sitzung.ist_aktiv and not trenn_ereignis.is_set():
             try:
                 eingabe = await asyncio.to_thread(cli_ui.eingabe_prompt, trenn_ereignis)
             except (EOFError, KeyboardInterrupt):
@@ -93,7 +99,7 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
             if eingabe.lower() in ("quit", "exit", "q"):
                 quit_durch_nutzer = True
                 break
-            if not await sitzung.nachricht_senden(eingabe):
+            if not await sitzung.chat_senden(eingabe):
                 cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
                 break
     finally:
@@ -104,7 +110,7 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
         except asyncio.CancelledError:
             pass
 
-    if sitzung.zustand == SitzungsZustand.VERBUNDEN:
+    if sitzung.ist_aktiv:
         await sitzung.verbindungsabbau()
 
     return quit_durch_nutzer
@@ -143,9 +149,17 @@ async def peer_starten(ziel: str, port: int, name: str) -> None:
         return
 
     rolle = "Server" if ist_server else "Client"
-    logger.info("Verbunden als %s mit %s:%d", rolle, ziel, port)
+    logger.info("TLS verbunden als %s mit %s:%d", rolle, ziel, port)
 
     sitzung = Sitzung(reader, writer, absender_name=name, server_modus=ist_server)
+
+    cli_ui.info_zeile(f"TLS verbunden als {rolle} – führe App-Handshake durch ...")
+    try:
+        await sitzung.verbinden()
+    except ConnectionError as fehler:
+        logger.error("App-Handshake fehlgeschlagen: %s", fehler)
+        cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
+        return
 
     cli_ui.info_zeile(f"Verbunden als {rolle} mit {ziel}:{port}")
     cli_ui.trennlinie()
@@ -219,7 +233,15 @@ async def server_starten(port: int, name: str) -> None:
 
             sitzung = Sitzung(reader, writer, absender_name=name, server_modus=True)
 
-            cli_ui.info_zeile(f"Client verbunden: {adresse[0]}")
+            cli_ui.info_zeile(f"Client verbunden: {adresse[0]} – führe App-Handshake durch ...")
+            try:
+                await sitzung.verbinden()
+            except ConnectionError as fehler:
+                logger.error("App-Handshake mit %s fehlgeschlagen: %s", adresse[0], fehler)
+                cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
+                continue
+
+            cli_ui.info_zeile(f"Sitzung bereit mit {adresse[0]}")
             cli_ui.trennlinie()
             print("  Nachrichten eingeben · 'quit' zum Beenden")
             cli_ui.trennlinie()
@@ -263,7 +285,7 @@ async def client_starten(ziel: str, port: int, name: str) -> None:
     cli_ui.info_zeile(f"Verbinde mit {ziel}:{port} ...")
     try:
         reader, writer = await verbindung_herstellen(ziel, port)
-        logger.info("Verbindung zu %s:%d hergestellt", ziel, port)
+        logger.info("TLS-Verbindung zu %s:%d hergestellt", ziel, port)
     except Exception as fehler:
         logger.error("Verbindungsaufbau zu %s:%d fehlgeschlagen: %s", ziel, port, fehler)
         cli_ui.info_zeile(f"Verbindung zu {ziel}:{port} nicht möglich")
@@ -271,7 +293,15 @@ async def client_starten(ziel: str, port: int, name: str) -> None:
 
     sitzung = Sitzung(reader, writer, absender_name=name, server_modus=False)
 
-    cli_ui.info_zeile(f"Verbunden mit {ziel}:{port}")
+    cli_ui.info_zeile(f"TLS verbunden mit {ziel}:{port} – führe App-Handshake durch ...")
+    try:
+        await sitzung.verbinden()
+    except ConnectionError as fehler:
+        logger.error("App-Handshake fehlgeschlagen: %s", fehler)
+        cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
+        return
+
+    cli_ui.info_zeile(f"Sitzung bereit mit {ziel}:{port}")
     cli_ui.trennlinie()
     print("  Nachrichten eingeben · 'quit' zum Beenden")
     cli_ui.trennlinie()

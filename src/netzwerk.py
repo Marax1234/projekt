@@ -36,6 +36,7 @@ Testschritte – Race-to-Connect (2 Terminals, gleichzeitig starten):
 """
 
 import asyncio
+import json
 import logging
 import ssl
 
@@ -256,6 +257,63 @@ async def auto_verbinden(
         "" if ist_server else f" (Server: {ziel_ip}:{port})",
     )
     return reader, writer, ist_server
+
+
+# ---------------------------------------------------------------------------
+# Protokoll-Framing – NDJSON (newline-delimited JSON)
+# ---------------------------------------------------------------------------
+
+async def frame_senden(writer: asyncio.StreamWriter, frame: dict) -> None:
+    """Serialisiert einen dict als NDJSON-Zeile und sendet ihn über den Stream.
+
+    Format: kompaktes JSON + '\\n', UTF-8-kodiert.
+
+    Parameter:
+        writer: Aktiver asyncio StreamWriter.
+        frame:  Protokoll-Frame als dict.
+
+    Wirft:
+        OSError:      Bei Netzwerkfehlern.
+        ssl.SSLError: Bei TLS-Fehlern.
+    """
+    linie = json.dumps(frame, ensure_ascii=False) + "\n"
+    rohdaten = linie.encode("utf-8")
+    try:
+        writer.write(rohdaten)
+        await writer.drain()
+    except (OSError, ssl.SSLError) as fehler:
+        logger.error("frame_senden fehlgeschlagen: %s", fehler)
+        raise
+    logger.debug("Frame gesendet: type=%s", frame.get("type"))
+
+
+async def frame_empfangen(reader: asyncio.StreamReader) -> dict:
+    """Liest eine NDJSON-Zeile vom Stream und gibt das deserialisierte dict zurück.
+
+    Parameter:
+        reader: Aktiver asyncio StreamReader.
+
+    Rückgabe:
+        Deserialisierter Frame als dict.
+
+    Wirft:
+        ConnectionError:   Wenn die Verbindung getrennt wurde (leerer Read).
+        json.JSONDecodeError: Bei ungültigem JSON.
+        OSError:           Bei Netzwerkfehlern.
+        ssl.SSLError:      Bei TLS-Fehlern.
+    """
+    try:
+        rohdaten = await reader.readline()
+    except (OSError, ssl.SSLError) as fehler:
+        logger.error("frame_empfangen fehlgeschlagen: %s", fehler)
+        raise
+
+    if not rohdaten:
+        raise ConnectionError("Verbindung getrennt")
+
+    frame = json.loads(rohdaten.decode("utf-8"))
+    logger.debug("Frame empfangen: type=%s", frame.get("type"))
+    return frame
 
 
 # ---------------------------------------------------------------------------

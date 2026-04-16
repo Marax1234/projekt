@@ -36,15 +36,7 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 
 ---
 
-## 5. Fehlendes Nachrichten-Framing (Pufferlimit)
-
-**Beschreibung:** Das Protokoll besitzt kein Framing (weder Length-Prefix noch Delimiter). Pro Empfangsaufruf werden maximal 4 096 Bytes gelesen.  
-**Ursache:** `netzwerk.py` – `daten_empfangen()` – ein einziger `recv(konfig.PUFFER_GROESSE)`-Aufruf ohne Reassemblierung; `konfig.py` – `PUFFER_GROESSE = 4096`.  
-**Auswirkung:** Da TCP ein Datenstrom ist, kann `recv()` unabhängig von der Nachrichtengröße ein partielles Fragment zurückgeben — der JSON-Parser schlägt dann mit `json.JSONDecodeError` fehl. Nachrichten, deren JSON-Repräsentation 4 096 Bytes überschreitet, werden zusätzlich hart abgeschnitten.
-
----
-
-## 6. Nur IPv4
+## 5. Nur IPv4
 
 **Beschreibung:** Das System unterstützt ausschließlich IPv4.  
 **Ursache:** `netzwerk.py:117` und `:214` – `socket.AF_INET` ist fest kodiert.  
@@ -52,7 +44,7 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 
 ---
 
-## 7. Eingeschränkter Wiederverbindungsmechanismus
+## 6. Eingeschränkter Wiederverbindungsmechanismus
 
 **Beschreibung:** Nach einem Verbindungsabbruch gibt es keine automatische Wiederverbindung.  
 **Ursache:** `sitzung.py` – bei `ConnectionError` wird der Zustand auf `GETRENNT` gesetzt und die Empfangsschleife beendet. Der Server wartet dank `while True`-Schleife in `konsole.py` auf den nächsten Client — der Client ist jedoch one-shot und beendet sich.  
@@ -60,23 +52,7 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 
 ---
 
-## 8. Kein Nachrichtenformat-Versioning
-
-**Beschreibung:** Das JSON-Protokoll enthält keine Versionsnummer.  
-**Ursache:** Das Payload-Format (`nachricht`, `zeitstempel`, `absender`) ist fest in `sitzung.py` kodiert.  
-**Auswirkung:** Zukünftige Protokollerweiterungen sind nicht rückwärtskompatibel; beide Peers müssen stets dieselbe Version verwenden.
-
----
-
-## 9. Kein App-Level-Handshake nach TLS
-
-**Beschreibung:** Nach dem mTLS-Handshake gibt es keine Bestätigung auf Anwendungsebene, dass beide Seiten die Verbindung als aktiv betrachten.  
-**Ursache:** `sitzung.py` setzt den Zustand direkt auf `VERBUNDEN` ohne einen Ping/Pong-Austausch. Ein Verbindungsabbruch zwischen TLS-Handshake und erstem `read()`/`write()` wird erst beim ersten Sendeversuch bemerkt.  
-**Auswirkung:** In seltenen Randbedingungen (z. B. Netzwerkunterbrechung exakt nach dem Handshake) erscheint die Verbindung kurz als verbunden, obwohl sie bereits tot ist.
-
----
-
-## 10. CA-Schlüssel wird während des Setups übertragen
+## 7. CA-Schlüssel wird während des Setups übertragen
 
 **Beschreibung:** Im empfohlenen Laborworkflow überträgt Peer A den privaten CA-Schlüssel (`ca_schluessel.pem`) per HTTP an Peer B, damit Peer B sein Peer-Zertifikat selbst signieren kann.  
 **Ursache:** Das Skript `certs/zertifikate_erstellen.sh --nur-peer-cert` benötigt sowohl `ca_zertifikat.pem` als auch `ca_schluessel.pem`, um die CSR zu signieren. Der HTTP-Transfer ist unverschlüsselt.  

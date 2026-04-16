@@ -38,7 +38,21 @@ LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_DATEINAME: str = "p2pchat.log"   # Log-Datei im Projektverzeichnis
 
 # ---------------------------------------------------------------------------
-# Anwendung
+# Anwendungsprotokoll
 # ---------------------------------------------------------------------------
-APP_VERSION: str = "1.0"             # Anwendungsversion
-PUFFER_GROESSE: int = 4096           # Empfangspuffer in Bytes
+APP_VERSION: str = "1.0"              # Anwendungsversion
+PROTOKOLL_VERSION: str = "1.0"        # Protokollversion (HELLO-Handshake)
+PUFFER_GROESSE: int = 4096            # Empfangspuffer in Bytes (Legacy)
+
+# Timeouts (Sekunden)
+HANDSHAKE_TIMEOUT: float = 5.0        # App-Handshake (HELLO/HELLO_ACK)
+ACK_TIMEOUT: float = 5.0              # CHAT → RECV_ACK
+PONG_TIMEOUT: float = 10.0            # PING → PONG
+IDLE_TIMEOUT: float = 30.0            # Idle-Zeit bis PING gesendet wird
+CLOSE_TIMEOUT: float = 2.0            # Graceful-Close-Warte-Zeit
+
+# Heartbeat
+HEARTBEAT_MAX_FEHLSCHLAEGE: int = 2   # Verpasste PONGs bis Verbindung geschlossen wird
+
+# Deduplizierung
+DEDUP_MAX_IDS: int = 1000             # Max. gecachte msg_ids pro Session

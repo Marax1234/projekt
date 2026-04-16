@@ -159,12 +159,38 @@ Log-Phasen:
 
 ## Protokoll-Übersicht
 
-Jede Nachricht wird als JSON-Objekt mit den Feldern `nachricht`, `zeitstempel`
-und `absender` als UTF-8-codierte Bytes direkt über den TLS-Kanal übertragen.
+Das Anwendungsprotokoll läuft über **TCP + TLS 1.3**. Nach dem mTLS-Handshake
+folgt ein anwendungsspezifischer App-Handshake (HELLO/HELLO\_ACK). Erst danach
+dürfen CHAT-Nachrichten gesendet werden.
 
+**Framing:** NDJSON (newline-delimited JSON) – jede Nachricht ist ein kompaktes
+JSON-Objekt, abgeschlossen durch `\n`, UTF-8-kodiert.
+
+**Pflichtfelder jeder Nachricht:**
+
+| Feld | Bedeutung |
+|---|---|
+| `type` | Nachrichtentyp (`HELLO`, `HELLO_ACK`, `CHAT`, `RECV_ACK`, `PING`, `PONG`, `ERROR`, `CLOSE`) |
+| `protocol_version` | Immer `"1.0"` |
+| `session_id` | Gesetzt nach erfolgreichem App-Handshake |
+| `msg_id` | UUID-basierte Nachrichten-ID |
+| `timestamp` | ISO-8601 UTC |
+| `payload` | Typabhängiger Nutzdaten-Block |
+
+Beispiel CHAT-Nachricht:
+
+```json
+{
+  "type": "CHAT",
+  "protocol_version": "1.0",
+  "session_id": "sess-7f3c1234",
+  "msg_id": "msg-6f0d4b0e-...",
+  "timestamp": "2026-04-16T11:20:00Z",
+  "payload": {"sender": "alice", "text": "Hallo"}
+}
 ```
-| JSON-Payload (n B, UTF-8) |
-```
+
+**Zustandsautomat:** `TLS_AUFGEBAUT` → `HANDSHAKE_AUSSTEHEND` → `BEREIT` (→ `VERALTET` → `SCHLIESSEN` → `GETRENNT`)
 
 **Sicherheit:**
 - **Vertraulichkeit & Integrität:** TLS 1.3 (AEAD) – gesamter Kanal verschlüsselt und integritätsgesichert
