@@ -152,8 +152,9 @@ async def auto_verbinden(
     Ablauf:
         1. Server-Task: bindet Port, wartet auf accept()
         2. Client-Task: wartet kurz (RACE_CLIENT_VERZOEGERUNG), dann connect()
-        3. asyncio.wait(FIRST_COMPLETED) – Gewinner liefert die Verbindung
-        4. Verlierer-Task wird per cancel() sauber abgebrochen
+        3. Wer zuerst verbindet, setzt ein geteiltes ergebnis-Future
+        4. asyncio.wait_for auf dieses Future – Timeout oder Ergebnis
+        5. Beide Tasks werden danach sauber abgebrochen
 
     Parameter:
         ziel_ip: IP-Adresse des anderen Peers.
@@ -169,38 +170,43 @@ async def auto_verbinden(
                          zustande kam oder beide Tasks fehlgeschlagen sind.
     """
 
-    async def _server_versuch() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        """Bindet den Port und wartet auf einen eingehenden Connect."""
-        kontext = tls_kontext_server()
-        verbunden: asyncio.Future = asyncio.get_running_loop().create_future()
+    # Geteiltes Future: wer zuerst verbindet (Server- oder Client-Task) setzt es.
+    ergebnis: asyncio.Future[
+        tuple[asyncio.StreamReader, asyncio.StreamWriter, bool]
+    ] = asyncio.get_running_loop().create_future()
 
+    async def _server_versuch() -> None:
+        """Lauscht auf eingehende Verbindungen und meldet die erste via ergebnis."""
         async def _handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
-            if not verbunden.done():
-                verbunden.set_result((r, w))
+            if not ergebnis.done():
+                ergebnis.set_result((r, w, True))
             else:
                 w.close()
                 await w.wait_closed()
 
         server = await asyncio.start_server(
-            _handle, host=konfig.BIND_ADRESSE, port=port, ssl=kontext,
+            _handle, host=konfig.BIND_ADRESSE, port=port, ssl=tls_kontext_server(),
         )
         try:
-            return await asyncio.wait_for(verbunden, timeout=konfig.RACE_TIMEOUT)
+            await asyncio.sleep(konfig.RACE_TIMEOUT)  # hält Server bis Timeout am Leben
         finally:
-            server.close()
-            # server.wait_closed() würde blockieren bis ALLE aktiven
-            # Verbindungen geschlossen sind – d.h. bis die Chat-Sitzung endet.
-            # Wir rufen es daher NICHT ab; server.close() genügt, um
-            # weitere Verbindungsannahmen zu stoppen.
+            server.close()  # stoppt neue Verbindungen; bestehende bleiben offen
 
-    async def _client_versuch() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        """Wartet kurz, dann verbindet sich zum Gegenpeer."""
+    async def _client_versuch() -> None:
+        """Wartet kurz, verbindet sich und meldet Erfolg via ergebnis."""
         await asyncio.sleep(konfig.RACE_CLIENT_VERZOEGERUNG)
-        kontext = tls_kontext_client()
-        return await asyncio.wait_for(
-            asyncio.open_connection(ziel_ip, port, ssl=kontext),
-            timeout=konfig.VERBINDUNGS_TIMEOUT,
-        )
+        try:
+            r, w = await asyncio.wait_for(
+                asyncio.open_connection(ziel_ip, port, ssl=tls_kontext_client()),
+                timeout=konfig.VERBINDUNGS_TIMEOUT,
+            )
+        except Exception:
+            return  # Verbindungsfehler ist OK – Server-Task läuft weiter
+        if not ergebnis.done():
+            ergebnis.set_result((r, w, False))
+        else:
+            w.close()
+            await w.wait_closed()
 
     logger.info(
         "Race-to-Connect gestartet: Ziel=%s Port=%d Timeout=%.0fs",
@@ -210,48 +216,22 @@ async def auto_verbinden(
     server_task = asyncio.create_task(_server_versuch(), name="RaceServer")
     client_task = asyncio.create_task(_client_versuch(), name="RaceClient")
 
-    # Warte auf ersten *erfolgreichen* Task – ein fehlgeschlagener Task (z.B.
-    # ECONNREFUSED beim Client) darf den noch-wartenden Server-Task NICHT
-    # abbrechen. Daher wird in einer Schleife weitergewartet solange noch Tasks
-    # laufen und noch kein Gewinner gefunden wurde.
-    remaining: set[asyncio.Task] = {server_task, client_task}
-    winner: asyncio.Task | None = None
-
-    while remaining and winner is None:
-        done, remaining = await asyncio.wait(
-            remaining,
-            return_when=asyncio.FIRST_COMPLETED,
-            timeout=konfig.RACE_TIMEOUT + 1,
+    try:
+        reader, writer, ist_server = await asyncio.wait_for(
+            ergebnis, timeout=konfig.RACE_TIMEOUT + 1,
         )
-        if not done:  # Timeout der äußeren Schleife
-            break
-        for task in done:
-            if not task.cancelled() and task.exception() is None:
-                winner = task
-                break
-
-    for task in remaining:
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
-
-    if winner is None:
-        last_exc = next(
-            (t.exception() for t in (server_task, client_task)
-             if t.done() and not t.cancelled() and t.exception() is not None),
-            None,
-        )
-        if last_exc:
-            raise ConnectionError(f"Race-to-Connect fehlgeschlagen: {last_exc}")
+    except asyncio.TimeoutError:
         raise ConnectionError(
             f"Race-to-Connect: Keine Verbindung zu {ziel_ip}:{port} "
             f"innerhalb von {konfig.RACE_TIMEOUT:.0f} Sekunden."
         )
-
-    reader, writer = winner.result()
-    ist_server = (winner is server_task)
+    finally:
+        for task in (server_task, client_task):
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     logger.info(
         "Race-to-Connect: %s-Rolle übernommen%s",
