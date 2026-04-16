@@ -159,7 +159,9 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
     if sitzung.ist_aktiv:
         await sitzung.verbindungsabbau()
 
-    return quit_durch_nutzer
+    # Peer hat die Verbindung geordnet beendet → kein Reconnect
+    peer_hat_beendet = sitzung.trenn_grund == "PEER_CLOSE"
+    return quit_durch_nutzer or peer_hat_beendet
 
 
 # ---------------------------------------------------------------------------
