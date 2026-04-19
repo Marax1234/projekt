@@ -38,11 +38,33 @@ Testschritte – Race-to-Connect (2 Terminals, gleichzeitig starten):
 import asyncio
 import json
 import logging
+import socket as _socket_modul
 import ssl
 
 import konfig
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# TCP Keep-Alive Konfiguration
+# ---------------------------------------------------------------------------
+
+def _keepalive_setzen(sock: _socket_modul.socket) -> None:
+    """Konfiguriert TCP Keep-Alive auf einem Socket.
+
+    SO_KEEPALIVE aktiviert das OS-Level-Keep-Alive. Die erweiterten Optionen
+    (KEEPIDLE, KEEPINTVL, KEEPCNT) sind plattformabhängig (Linux/macOS/Win10+);
+    nicht verfügbare Optionen werden stillschweigend übersprungen.
+    """
+    sock.setsockopt(_socket_modul.SOL_SOCKET, _socket_modul.SO_KEEPALIVE, 1)
+    if hasattr(_socket_modul, "TCP_KEEPIDLE"):
+        sock.setsockopt(_socket_modul.IPPROTO_TCP, _socket_modul.TCP_KEEPIDLE, 5)
+    if hasattr(_socket_modul, "TCP_KEEPINTVL"):
+        sock.setsockopt(_socket_modul.IPPROTO_TCP, _socket_modul.TCP_KEEPINTVL, 3)
+    if hasattr(_socket_modul, "TCP_KEEPCNT"):
+        sock.setsockopt(_socket_modul.IPPROTO_TCP, _socket_modul.TCP_KEEPCNT, 3)
+    logger.debug("TCP Keep-Alive konfiguriert (fd=%s)", sock.fileno())
 
 
 # ---------------------------------------------------------------------------
@@ -137,14 +159,20 @@ async def verbindung_herstellen(
     """
     kontext = tls_kontext_client()
     logger.info("Verbinde zu %s:%d ...", server_ip, port)
+    raw_sock = _socket_modul.socket(_socket_modul.AF_INET, _socket_modul.SOCK_STREAM)
+    _keepalive_setzen(raw_sock)
+    raw_sock.setblocking(False)
+    loop = asyncio.get_running_loop()
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(
-                server_ip, port, ssl=kontext, limit=konfig.MAX_FRAME_BYTES
-            ),
+        await asyncio.wait_for(
+            loop.sock_connect(raw_sock, (server_ip, port)),
             timeout=konfig.VERBINDUNGS_TIMEOUT,
         )
+        reader, writer = await asyncio.open_connection(
+            sock=raw_sock, ssl=kontext, limit=konfig.MAX_FRAME_BYTES
+        )
     except (OSError, ssl.SSLError, asyncio.TimeoutError) as fehler:
+        raw_sock.close()
         logger.error("Verbindung zu %s:%d fehlgeschlagen: %s", server_ip, port, fehler)
         raise
 
@@ -199,6 +227,9 @@ async def auto_verbinden(
     async def _server_versuch() -> None:
         """Lauscht auf eingehende Verbindungen und meldet die erste via ergebnis."""
         async def _handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+            sock = w.get_extra_info("socket")
+            if sock:
+                _keepalive_setzen(sock)
             if not ergebnis.done():
                 ergebnis.set_result((r, w, True))
             else:
@@ -220,14 +251,20 @@ async def auto_verbinden(
     async def _client_versuch() -> None:
         """Wartet kurz, verbindet sich und meldet Erfolg via ergebnis."""
         await asyncio.sleep(konfig.RACE_CLIENT_VERZOEGERUNG)
+        raw_sock = _socket_modul.socket(_socket_modul.AF_INET, _socket_modul.SOCK_STREAM)
+        _keepalive_setzen(raw_sock)
+        raw_sock.setblocking(False)
         try:
-            r, w = await asyncio.wait_for(
-                asyncio.open_connection(
-                    ziel_ip, port, ssl=tls_kontext_client(), limit=konfig.MAX_FRAME_BYTES
-                ),
+            loop = asyncio.get_running_loop()
+            await asyncio.wait_for(
+                loop.sock_connect(raw_sock, (ziel_ip, port)),
                 timeout=konfig.VERBINDUNGS_TIMEOUT,
             )
+            r, w = await asyncio.open_connection(
+                sock=raw_sock, ssl=tls_kontext_client(), limit=konfig.MAX_FRAME_BYTES
+            )
         except Exception:
+            raw_sock.close()
             return  # Verbindungsfehler ist OK – Server-Task läuft weiter
         if not ergebnis.done():
             ergebnis.set_result((r, w, False))

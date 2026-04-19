@@ -34,6 +34,7 @@ import asyncio
 import logging
 import sys
 
+import cli_ui
 import konfig
 import konsole
 
@@ -45,15 +46,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _logging_initialisieren(level: str) -> None:
-    """Konfiguriert das Logging-System für die gesamte Anwendung."""
+    """Konfiguriert das Logging-System für die gesamte Anwendung.
+
+    Im Normalbetrieb werden Logs ausschließlich in die Datei geschrieben, damit
+    kein Logger-Output die CLI-Ausgabe verschmutzt. Mit --debug wird zusätzlich
+    auf stdout geloggt.
+    """
     numerischer_level = getattr(logging, level.upper(), logging.INFO)
+    handlers: list[logging.Handler] = [
+        logging.FileHandler(konfig.LOG_DATEINAME, encoding="utf-8"),
+    ]
+    if level.upper() == "DEBUG":
+        handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(
         level=numerischer_level,
         format=konfig.LOG_FORMAT,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(konfig.LOG_DATEINAME, encoding="utf-8"),
-        ],
+        handlers=handlers,
     )
     logger.debug("Logging initialisiert mit Level: %s", level.upper())
 
@@ -128,7 +136,10 @@ async def main() -> None:
 
     # 1. Auto-Modus (Race to Connect): --ziel angegeben, kein --modus
     if args.ziel and not args.modus:
-        name = args.name or "Peer"
+        cli_ui.banner_anzeigen()
+        print()
+        standard_name = "Peer"
+        name = args.name or cli_ui.username_abfragen(standard_name)
         logger.info(
             "Starte P2P-Chat im Auto-Modus (Ziel: %s, Name: %s, Port: %d)",
             args.ziel, name, args.port,
@@ -151,7 +162,11 @@ async def main() -> None:
         print("Fehler: --ziel IP-Adresse angeben (z. B. --ziel 192.168.56.101)")
         sys.exit(1)
 
-    name = args.name or ("Server" if args.modus == "server" else "Client")
+    cli_ui.banner_anzeigen()
+    print()
+    name = args.name or cli_ui.username_abfragen(
+        "Server" if args.modus == "server" else "Client"
+    )
     logger.info(
         "Starte P2P-Chat im manuellen %s-Modus (Name: %s, Port: %d)",
         args.modus.upper(), name, args.port,

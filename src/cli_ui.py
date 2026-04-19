@@ -159,6 +159,32 @@ def nachricht_ausgeben(absender: str, text: str, zeitstempel: str) -> None:
     print("> ", end="", flush=True)
 
 
+def eigene_nachricht_ausgeben(absender: str, text: str) -> None:
+    """Zeigt eine erfolgreich gesendete eigene Nachricht mit Zeitstempel an.
+
+    Beispiel:
+        > [14:32:06] Du (Alice): Hallo!
+        >
+    """
+    import datetime
+    anzeige_zeit = datetime.datetime.now().strftime("%H:%M:%S")
+    print(f"\r  [{anzeige_zeit}] {absender}: {text}")
+    print("> ", end="", flush=True)
+
+
+def username_abfragen(standard: str = "Peer") -> str:
+    """Fragt den Benutzer nach seinem Anzeigenamen.
+
+    Gibt den eingegebenen Namen zurück oder `standard` wenn nichts eingegeben wurde.
+    """
+    try:
+        print(f"Bitte Benutzernamen eingeben [{standard}]: ", end="", flush=True)
+        name = sys.stdin.readline().strip()
+        return name if name else standard
+    except (EOFError, KeyboardInterrupt):
+        return standard
+
+
 def eingabe_prompt(trenn_ereignis=None) -> str | None:
     """Liest eine Zeile vom Nutzer (mit ``>``-Prompt).
 

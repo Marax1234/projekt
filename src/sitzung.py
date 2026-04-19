@@ -134,6 +134,15 @@ class Sitzung:
         self._receiver_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
 
+        # Store & Forward – Outbox für unbestätigte Nachrichten
+        self._outbox: collections.deque[tuple[int, str]] = collections.deque()
+        self._naechste_seq: int = 0
+        self._bestaetigt_bis: int = -1
+
+        # Session Resumption
+        self._resume_token: str = ""       # letzter bekannter Resume-Token
+        self._zuletzt_empfangene_seq: int = -1  # höchste empfangene seq vom Peer
+
     # -------------------------------------------------------------------------
     # Zustandsautomat
     # -------------------------------------------------------------------------
@@ -153,6 +162,23 @@ class Sitzung:
     def verbindungs_zustand(self) -> VerbindungsZustand:
         """Vereinfachter externer Verbindungszustand (VERBUNDEN/IDLE/PING_PENDING/GETRENNT/RECONNECTING)."""
         return self._verbindungs_zustand
+
+    def sitzungs_zustand_uebernehmen(
+        self,
+        outbox: collections.deque,
+        naechste_seq: int,
+        resume_token: str = "",
+        zuletzt_empfangene_seq: int = -1,
+    ) -> None:
+        """Überträgt Outbox und Sitzungszustand für Reconnect-Continuity.
+
+        Muss vor verbinden() aufgerufen werden, damit outbox_wiederholen()
+        nach dem Handshake die ausstehenden Nachrichten erneut sendet.
+        """
+        self._outbox = outbox
+        self._naechste_seq = naechste_seq
+        self._resume_token = resume_token
+        self._zuletzt_empfangene_seq = zuletzt_empfangene_seq
 
     # -------------------------------------------------------------------------
     # Framing (delegiert an netzwerk.py)
@@ -258,12 +284,19 @@ class Sitzung:
         """Server: APP_HELLO senden, auf APP_HELLO_ACK warten.
 
         Prüft, ob das APP_HELLO_ACK die korrekte app_session_id zurückspiegelt.
+        Enthält resume_token und last_received_seq für Session-Resumption.
         """
         self.sitzungs_id = "sess-" + str(uuid.uuid4())[:8]
+        self._resume_token = self.sitzungs_id
 
         hello = self._frame(
             "APP_HELLO",
-            {"server_name": self.absender_name, "capabilities": ["app_msg_ack", "app_ping"]},
+            {
+                "server_name": self.absender_name,
+                "capabilities": ["app_msg_ack", "app_ping", "session_resume"],
+                "resume_token": self._resume_token,
+                "last_received_seq": self._zuletzt_empfangene_seq,
+            },
         )
         await self._senden(hello)
         logger.debug("APP_HELLO gesendet (app_session_id=%s)", self.sitzungs_id)
@@ -281,15 +314,21 @@ class Sitzung:
                 f"app_session_id-Mismatch im APP_HELLO_ACK: "
                 f"erwartet={self.sitzungs_id}, erhalten={ack.get('app_session_id')}"
             )
+        # Peer-seitigen letzten empfangenen Seq übernehmen
+        peer_last_seq = ack.get("data", {}).get("last_received_seq", -1)
+        if isinstance(peer_last_seq, int):
+            self._bestaetigt_bis = peer_last_seq
         logger.debug(
-            "APP_HELLO_ACK empfangen von %s",
+            "APP_HELLO_ACK empfangen von %s (last_received_seq=%s)",
             ack.get("data", {}).get("client_name", "?"),
+            peer_last_seq,
         )
 
     async def _handshake_client(self) -> None:
         """Client: auf APP_HELLO warten, APP_HELLO_ACK senden.
 
         Übernimmt die app_session_id aus APP_HELLO; lehnt leere Session-IDs ab.
+        Sendet resume_token und last_received_seq für Session-Resumption.
         """
         hello = await asyncio.wait_for(
             self._empfangen(), timeout=konfig.HANDSHAKE_TIMEOUT
@@ -303,18 +342,29 @@ class Sitzung:
         self.sitzungs_id = hello.get("app_session_id", "")
         if not self.sitzungs_id:
             raise ConnectionError("APP_HELLO enthält keine gültige app_session_id")
+
+        # Server-seitigen letzten empfangenen Seq-Hinweis übernehmen
+        server_last_seq = hello.get("data", {}).get("last_received_seq", -1)
+        if isinstance(server_last_seq, int) and server_last_seq > self._bestaetigt_bis:
+            self._bestaetigt_bis = server_last_seq
         logger.debug(
-            "APP_HELLO empfangen von %s, app_session_id=%s",
+            "APP_HELLO empfangen von %s, app_session_id=%s, last_received_seq=%s",
             hello.get("data", {}).get("server_name", "?"),
             self.sitzungs_id,
+            server_last_seq,
         )
 
         ack = self._frame(
             "APP_HELLO_ACK",
-            {"client_name": self.absender_name, "capabilities": ["app_msg_ack", "app_ping"]},
+            {
+                "client_name": self.absender_name,
+                "capabilities": ["app_msg_ack", "app_ping", "session_resume"],
+                "resume_token": self._resume_token,
+                "last_received_seq": self._zuletzt_empfangene_seq,
+            },
         )
         await self._senden(ack)
-        logger.debug("APP_HELLO_ACK gesendet")
+        logger.debug("APP_HELLO_ACK gesendet (resume_token=%s)", self._resume_token)
 
     # -------------------------------------------------------------------------
     # Receiver Loop (Schritt 5 der Implementierungsreihenfolge)
@@ -448,6 +498,11 @@ class Sitzung:
         """Verarbeitet eine eingehende CHAT-Nachricht mit Deduplizierung."""
         msg_id = frame.get("msg_id", "")
 
+        # Sequenznummer für Session-Resumption tracken
+        seq = frame.get("data", {}).get("seq", None)
+        if isinstance(seq, int) and seq > self._zuletzt_empfangene_seq:
+            self._zuletzt_empfangene_seq = seq
+
         # Deduplizierung: bereits gesehene msg_id?
         if msg_id and msg_id in self._seen_ids:
             logger.debug("Duplikat CHAT %s – verworfen, sende erneut APP_MSG_ACK", msg_id)
@@ -535,29 +590,26 @@ class Sitzung:
     # CHAT senden mit ACK-Mechanik (Schritt 6)
     # -------------------------------------------------------------------------
 
-    async def chat_senden(self, text: str) -> bool:
-        """Sendet eine CHAT-Nachricht und wartet auf RECV_ACK.
+    async def _sende_chat_frame(self, seq: int, text: str) -> bool:
+        """Sendet einen CHAT-Frame mit gegebener Sequenznummer und wartet auf ACK.
 
-        Wartet auf APP_MSG_ACK vom Peer. Bei Timeout wird die Verbindung als
-        VERALTET markiert und geschlossen.
+        Interner Helfer, der von chat_senden() und outbox_wiederholen() genutzt wird.
+        Verändert die Outbox nicht.
 
         Parameter:
-            text: Zu sendender Nachrichtentext.
+            seq:  Sequenznummer der Nachricht.
+            text: Nachrichtentext.
 
         Rückgabe:
-            True bei bestätigtem Empfang (APP_MSG_ACK erhalten), False bei Fehler.
+            True bei bestätigtem Empfang, False bei Fehler.
         """
-        if self.zustand != SitzungsZustand.BEREIT:
-            logger.error("chat_senden: Zustand %s statt BEREIT", self.zustand.value)
-            return False
-
         msg_id = _neue_id("msg")
         ack_fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending_acks[msg_id] = ack_fut
 
         frame = self._frame(
             "CHAT",
-            {"sender": self.absender_name, "text": text},
+            {"sender": self.absender_name, "text": text, "seq": seq},
             msg_id=msg_id,
         )
 
@@ -570,7 +622,7 @@ class Sitzung:
 
         try:
             await asyncio.wait_for(ack_fut, timeout=konfig.ACK_TIMEOUT)
-            logger.debug("APP_MSG_ACK erhalten für %s", msg_id)
+            logger.debug("APP_MSG_ACK erhalten für seq=%d (%s)", seq, msg_id)
             return True
         except asyncio.TimeoutError:
             self._pending_acks.pop(msg_id, None)
@@ -580,6 +632,64 @@ class Sitzung:
             self._zustand_setzen(SitzungsZustand.VERALTET)
             await self._sitzung_schliessen("ACK_TIMEOUT")
             return False
+
+    async def chat_senden(self, text: str) -> bool:
+        """Sendet eine CHAT-Nachricht und wartet auf RECV_ACK.
+
+        Legt die Nachricht zuerst in der Outbox ab. Nach erhaltenem ACK wird
+        sie daraus entfernt. Bei Verbindungsunterbrechung bleibt sie in der
+        Outbox für ein späteres outbox_wiederholen().
+
+        Parameter:
+            text: Zu sendender Nachrichtentext.
+
+        Rückgabe:
+            True bei bestätigtem Empfang (APP_MSG_ACK erhalten), False bei Fehler.
+        """
+        if self.zustand != SitzungsZustand.BEREIT:
+            logger.error("chat_senden: Zustand %s statt BEREIT", self.zustand.value)
+            return False
+
+        seq = self._naechste_seq
+        self._naechste_seq += 1
+        self._outbox.append((seq, text))
+
+        erfolg = await self._sende_chat_frame(seq, text)
+        if erfolg:
+            self._bestaetigt_bis = seq
+            while self._outbox and self._outbox[0][0] <= seq:
+                self._outbox.popleft()
+        return erfolg
+
+    async def outbox_wiederholen(self) -> None:
+        """Sendet alle unbestätigten Nachrichten der Outbox erneut (Replay).
+
+        Wird nach einem Reconnect aufgerufen, um Nachrichten nachzuliefern,
+        die während der Unterbrechung nicht bestätigt wurden. Bricht ab,
+        sobald die Sitzung nicht mehr BEREIT ist.
+        """
+        if not self._outbox:
+            return
+        logger.info(
+            "Outbox-Replay: %d ausstehende Nachricht(en) werden erneut gesendet",
+            len(self._outbox),
+        )
+        for seq, text in list(self._outbox):
+            if self.zustand != SitzungsZustand.BEREIT:
+                break
+            # Nachrichten vor _bestaetigt_bis wurden bereits von der Gegenseite
+            # bestätigt (laut last_received_seq im Handshake) – überspringen
+            if seq <= self._bestaetigt_bis:
+                while self._outbox and self._outbox[0][0] <= seq:
+                    self._outbox.popleft()
+                continue
+            erfolg = await self._sende_chat_frame(seq, text)
+            if erfolg:
+                self._bestaetigt_bis = seq
+                while self._outbox and self._outbox[0][0] <= seq:
+                    self._outbox.popleft()
+            else:
+                break  # Verbindung verloren – Abbruch, Outbox bleibt erhalten
 
     # -------------------------------------------------------------------------
     # Fehler senden (Best-effort)
