@@ -159,22 +159,21 @@ async def verbindung_herstellen(
     """
     kontext = tls_kontext_client()
     logger.info("Verbinde zu %s:%d ...", server_ip, port)
-    raw_sock = _socket_modul.socket(_socket_modul.AF_INET, _socket_modul.SOCK_STREAM)
-    _keepalive_setzen(raw_sock)
-    raw_sock.setblocking(False)
-    loop = asyncio.get_running_loop()
     try:
-        await asyncio.wait_for(
-            loop.sock_connect(raw_sock, (server_ip, port)),
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(
+                server_ip, port, ssl=kontext, limit=konfig.MAX_FRAME_BYTES
+            ),
             timeout=konfig.VERBINDUNGS_TIMEOUT,
         )
-        reader, writer = await asyncio.open_connection(
-            sock=raw_sock, ssl=kontext, limit=konfig.MAX_FRAME_BYTES
-        )
     except (OSError, ssl.SSLError, asyncio.TimeoutError) as fehler:
-        raw_sock.close()
         logger.error("Verbindung zu %s:%d fehlgeschlagen: %s", server_ip, port, fehler)
         raise
+
+    # TCP Keep-Alive auf dem darunterliegenden Socket setzen (unterhalb TLS-Schicht)
+    sock = writer.get_extra_info("socket")
+    if sock:
+        _keepalive_setzen(sock)
 
     logger.info(
         "TLS-Verbindung hergestellt – Server: %s:%d, Cipher: %s",
@@ -251,21 +250,19 @@ async def auto_verbinden(
     async def _client_versuch() -> None:
         """Wartet kurz, verbindet sich und meldet Erfolg via ergebnis."""
         await asyncio.sleep(konfig.RACE_CLIENT_VERZOEGERUNG)
-        raw_sock = _socket_modul.socket(_socket_modul.AF_INET, _socket_modul.SOCK_STREAM)
-        _keepalive_setzen(raw_sock)
-        raw_sock.setblocking(False)
         try:
-            loop = asyncio.get_running_loop()
-            await asyncio.wait_for(
-                loop.sock_connect(raw_sock, (ziel_ip, port)),
+            r, w = await asyncio.wait_for(
+                asyncio.open_connection(
+                    ziel_ip, port, ssl=tls_kontext_client(), limit=konfig.MAX_FRAME_BYTES
+                ),
                 timeout=konfig.VERBINDUNGS_TIMEOUT,
             )
-            r, w = await asyncio.open_connection(
-                sock=raw_sock, ssl=tls_kontext_client(), limit=konfig.MAX_FRAME_BYTES
-            )
         except Exception:
-            raw_sock.close()
             return  # Verbindungsfehler ist OK – Server-Task läuft weiter
+        # TCP Keep-Alive nach erfolgreichem TLS-Aufbau setzen
+        sock = w.get_extra_info("socket")
+        if sock:
+            _keepalive_setzen(sock)
         if not ergebnis.done():
             ergebnis.set_result((r, w, False))
         else:
