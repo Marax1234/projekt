@@ -31,9 +31,11 @@ Verwendung:
 
 import argparse
 import asyncio
+import curses
 import logging
 import sys
 
+import cli_ui
 import konfig
 import konsole
 
@@ -45,15 +47,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _logging_initialisieren(level: str) -> None:
-    """Konfiguriert das Logging-System für die gesamte Anwendung."""
+    """Konfiguriert das Logging-System für die gesamte Anwendung.
+
+    Im Normalbetrieb werden Logs ausschließlich in die Datei geschrieben, damit
+    kein Logger-Output die CLI-Ausgabe verschmutzt. Mit --debug wird zusätzlich
+    auf stdout geloggt.
+    """
     numerischer_level = getattr(logging, level.upper(), logging.INFO)
+    handlers: list[logging.Handler] = [
+        logging.FileHandler(konfig.LOG_DATEINAME, encoding="utf-8"),
+    ]
+    if level.upper() == "DEBUG":
+        handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(
         level=numerischer_level,
         format=konfig.LOG_FORMAT,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(konfig.LOG_DATEINAME, encoding="utf-8"),
-        ],
+        handlers=handlers,
     )
     logger.debug("Logging initialisiert mit Level: %s", level.upper())
 
@@ -119,25 +128,21 @@ def _argumente_parsen() -> argparse.Namespace:
 # Einstiegspunkt
 # ---------------------------------------------------------------------------
 
-async def main() -> None:
-    """Parst Argumente, initialisiert Logging und startet den gewählten Modus."""
+def main() -> None:
+    """Parst Argumente, zeigt Banner, fragt Benutzernamen und startet die curses-TUI.
+
+    Die Abfrage des Benutzernamens und der Banner werden vor ``curses.wrapper()``
+    ausgegeben, sodass normales print()/input() möglich ist. Danach übernimmt
+    curses.wrapper() die Terminal-Steuerung und setzt das Terminal beim Beenden
+    (auch bei Absturz) zuverlässig zurück.
+    """
     args = _argumente_parsen()
 
     log_level = "DEBUG" if args.debug else konfig.LOG_LEVEL
     _logging_initialisieren(log_level)
 
-    # 1. Auto-Modus (Race to Connect): --ziel angegeben, kein --modus
-    if args.ziel and not args.modus:
-        name = args.name or "Peer"
-        logger.info(
-            "Starte P2P-Chat im Auto-Modus (Ziel: %s, Name: %s, Port: %d)",
-            args.ziel, name, args.port,
-        )
-        await konsole.peer_starten(args.ziel, args.port, name)
-        return
-
-    # 2. Manueller Modus (rückwärtskompatibel): --modus server|client
-    if not args.modus:
+    # Modus-Validierung vor TUI-Start
+    if not args.modus and not args.ziel:
         logger.error("Kein Modus angegeben: --ziel IP oder --modus server|client")
         print(
             "Fehler: Bitte angeben:\n"
@@ -151,20 +156,44 @@ async def main() -> None:
         print("Fehler: --ziel IP-Adresse angeben (z. B. --ziel 192.168.56.101)")
         sys.exit(1)
 
-    name = args.name or ("Server" if args.modus == "server" else "Client")
+    # Standard-Anzeigename ermitteln
+    if args.ziel and not args.modus:
+        standard_name = "Peer"
+    elif args.modus == "server":
+        standard_name = "Server"
+    else:
+        standard_name = "Client"
+
+    # Pre-TUI: Banner und Benutzernamen-Abfrage (nutzt print/input vor curses)
+    cli_ui.banner_anzeigen()
+    print()
+    name = args.name or cli_ui.username_abfragen(standard_name)
+
     logger.info(
-        "Starte P2P-Chat im manuellen %s-Modus (Name: %s, Port: %d)",
-        args.modus.upper(), name, args.port,
+        "Starte P2P-Chat (Modus: %s, Name: %s, Port: %d)",
+        args.modus or "auto", name, args.port,
     )
 
-    if args.modus == "server":
-        await konsole.server_starten(args.port, name)
-    else:
-        await konsole.client_starten(args.ziel, args.port, name)
+    # Innere asynchrone Chat-Funktion – läuft innerhalb der TUI
+    async def _chat() -> None:
+        if args.ziel and not args.modus:
+            await konsole.peer_starten(args.ziel, args.port, name)
+        elif args.modus == "server":
+            await konsole.server_starten(args.port, name)
+        else:
+            await konsole.client_starten(args.ziel, args.port, name)
+
+    # curses.wrapper initialisiert ncurses, ruft _curses_main auf und stellt
+    # das Terminal beim Beenden (auch bei Exception) sauber wieder her.
+    def _curses_main(stdscr) -> None:
+        cli_ui.tui_starten(stdscr)
+        asyncio.run(_chat())
+
+    try:
+        curses.wrapper(_curses_main)
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    main()

@@ -38,11 +38,33 @@ Testschritte – Race-to-Connect (2 Terminals, gleichzeitig starten):
 import asyncio
 import json
 import logging
+import socket as _socket_modul
 import ssl
 
 import konfig
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# TCP Keep-Alive Konfiguration
+# ---------------------------------------------------------------------------
+
+def _keepalive_setzen(sock: _socket_modul.socket) -> None:
+    """Konfiguriert TCP Keep-Alive auf einem Socket.
+
+    SO_KEEPALIVE aktiviert das OS-Level-Keep-Alive. Die erweiterten Optionen
+    (KEEPIDLE, KEEPINTVL, KEEPCNT) sind plattformabhängig (Linux/macOS/Win10+);
+    nicht verfügbare Optionen werden stillschweigend übersprungen.
+    """
+    sock.setsockopt(_socket_modul.SOL_SOCKET, _socket_modul.SO_KEEPALIVE, 1)
+    if hasattr(_socket_modul, "TCP_KEEPIDLE"):
+        sock.setsockopt(_socket_modul.IPPROTO_TCP, _socket_modul.TCP_KEEPIDLE, 5)
+    if hasattr(_socket_modul, "TCP_KEEPINTVL"):
+        sock.setsockopt(_socket_modul.IPPROTO_TCP, _socket_modul.TCP_KEEPINTVL, 3)
+    if hasattr(_socket_modul, "TCP_KEEPCNT"):
+        sock.setsockopt(_socket_modul.IPPROTO_TCP, _socket_modul.TCP_KEEPCNT, 3)
+    logger.debug("TCP Keep-Alive konfiguriert (fd=%s)", sock.fileno())
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +170,11 @@ async def verbindung_herstellen(
         logger.error("Verbindung zu %s:%d fehlgeschlagen: %s", server_ip, port, fehler)
         raise
 
+    # TCP Keep-Alive auf dem darunterliegenden Socket setzen (unterhalb TLS-Schicht)
+    sock = writer.get_extra_info("socket")
+    if sock:
+        _keepalive_setzen(sock)
+
     logger.info(
         "TLS-Verbindung hergestellt – Server: %s:%d, Cipher: %s",
         server_ip, port,
@@ -199,6 +226,9 @@ async def auto_verbinden(
     async def _server_versuch() -> None:
         """Lauscht auf eingehende Verbindungen und meldet die erste via ergebnis."""
         async def _handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+            sock = w.get_extra_info("socket")
+            if sock:
+                _keepalive_setzen(sock)
             if not ergebnis.done():
                 ergebnis.set_result((r, w, True))
             else:
@@ -229,6 +259,10 @@ async def auto_verbinden(
             )
         except Exception:
             return  # Verbindungsfehler ist OK – Server-Task läuft weiter
+        # TCP Keep-Alive nach erfolgreichem TLS-Aufbau setzen
+        sock = w.get_extra_info("socket")
+        if sock:
+            _keepalive_setzen(sock)
         if not ergebnis.done():
             ergebnis.set_result((r, w, False))
         else:

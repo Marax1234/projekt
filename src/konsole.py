@@ -16,6 +16,7 @@ Modul:        Network Security 2026
 """
 
 import asyncio
+import collections
 import logging
 import random
 import sys
@@ -23,23 +24,53 @@ import threading
 
 import cli_ui
 import konfig
-from netzwerk import auto_verbinden, tls_kontext_server, verbindung_herstellen
+from netzwerk import auto_verbinden, tls_kontext_server, verbindung_herstellen, _keepalive_setzen
 from sitzung import Sitzung
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Peer-Identität aus mTLS-Zertifikat
+# ---------------------------------------------------------------------------
+
+def _peer_cn_aus_zertifikat(ssl_objekt) -> str:
+    """Extrahiert den CommonName aus dem mTLS-Peer-Zertifikat.
+
+    Parameter:
+        ssl_objekt: ssl.SSLObject aus writer.get_extra_info("ssl_object")
+
+    Rückgabe:
+        CommonName-String oder "" wenn nicht verfügbar.
+    """
+    if ssl_objekt is None:
+        return ""
+    try:
+        cert = ssl_objekt.getpeercert()
+        if not cert:
+            return ""
+        for rdnseq in cert.get("subject", ()):
+            for key, value in rdnseq:
+                if key == "commonName":
+                    return str(value)
+    except Exception:
+        pass
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Backoff-Berechnung für Reconnect
 # ---------------------------------------------------------------------------
 
-def _backoff_sekunden(versuch: int, basis: float = 2.0, maximum: float = 60.0) -> float:
+def _backoff_sekunden(versuch: int, basis: float = 2.0, maximum: float = 10.0) -> float:
     """Berechnet Wartezeit für exponentielles Backoff mit Jitter.
 
     Parameter:
         versuch: Anzahl bisheriger Fehlversuche (> 0).
         basis:   Basis des Exponenten (Standard: 2.0).
-        maximum: Maximale Wartezeit in Sekunden (Standard: 60.0).
+        maximum: Maximale Wartezeit in Sekunden (Standard: 10.0).
+                 Begrenzt auf 10 s, damit Reconnects nicht zu lange auf sich
+                 warten lassen (2^4 = 16 s würde sonst schon überschritten).
 
     Rückgabe:
         Wartezeit in Sekunden (capped bei maximum).
@@ -100,7 +131,6 @@ async def _empfangs_schleife(sitzung: Sitzung, herkunft: str) -> None:
         text        = payload.get("text", "")
         zeitstempel = frame.get("timestamp", "")
         cli_ui.nachricht_ausgeben(absender, text, zeitstempel)
-        logger.info("[%s] %s: %s", zeitstempel, absender, text)
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +178,7 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
             if not await sitzung.chat_senden(eingabe):
                 cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
                 break
+            cli_ui.eigene_nachricht_ausgeben(sitzung.absender_name, eingabe)
     finally:
         trenn_ereignis.set()
         empfang_task.cancel()
@@ -181,12 +212,15 @@ async def peer_starten(ziel: str, port: int, name: str) -> None:
         port: TCP-Port
         name: Anzeigename für Nachrichten
     """
-    cli_ui.banner_anzeigen()
-    print()
     cli_ui.status_box("auto", port, name)
-    print()
+    cli_ui.leerzeile()
 
     versuch = 0
+    # Outbox-Zustand über Reconnects hinweg beibehalten
+    _outbox: collections.deque[tuple[int, str]] = collections.deque()
+    _naechste_seq: int = 0
+    _resume_token: str = ""
+    _zuletzt_empfangene_seq: int = -1
 
     while True:
         # Backoff vor Reconnect-Versuchen
@@ -203,7 +237,7 @@ async def peer_starten(ziel: str, port: int, name: str) -> None:
         cli_ui.info_zeile(f"Race to Connect mit {ziel}:{port} ...")
         if versuch == 0:
             cli_ui.info_zeile("Warte auf Verbindung oder verbinde – Rolle wird automatisch bestimmt")
-        print()
+        cli_ui.leerzeile()
 
         try:
             reader, writer, ist_server = await auto_verbinden(ziel, port)
@@ -223,6 +257,9 @@ async def peer_starten(ziel: str, port: int, name: str) -> None:
         logger.info("TLS verbunden als %s mit %s:%d", rolle, ziel, port)
 
         sitzung = Sitzung(reader, writer, absender_name=name, server_modus=ist_server)
+        sitzung.sitzungs_zustand_uebernehmen(
+            _outbox, _naechste_seq, _resume_token, _zuletzt_empfangene_seq
+        )
 
         cli_ui.info_zeile(f"TLS verbunden als {rolle} – führe App-Handshake durch ...")
         try:
@@ -233,20 +270,31 @@ async def peer_starten(ziel: str, port: int, name: str) -> None:
             versuch += 1
             continue
 
+        # Ausstehende Nachrichten aus der Outbox erneut senden
+        if _outbox:
+            cli_ui.info_zeile(f"Sende {len(_outbox)} ausstehende Nachricht(en) nach Reconnect ...")
+            await sitzung.outbox_wiederholen()
+
         cli_ui.info_zeile(f"Verbunden als {rolle} mit {ziel}:{port}")
         cli_ui.trennlinie()
-        print("  Nachrichten eingeben · 'quit' zum Beenden")
+        cli_ui.chat_hinweis()
         cli_ui.trennlinie()
-        print()
+        cli_ui.leerzeile()
 
         quit_durch_nutzer = await _chat_sitzung_fuehren(sitzung, "Peer")
+
+        # Outbox-Zustand für nächsten Reconnect sichern
+        _outbox = sitzung._outbox
+        _naechste_seq = sitzung._naechste_seq
+        _resume_token = sitzung._resume_token
+        _zuletzt_empfangene_seq = sitzung._zuletzt_empfangene_seq
 
         if quit_durch_nutzer:
             break
 
         versuch += 1  # Unerwartetes Ende → Reconnect vorbereiten
 
-    print()
+    cli_ui.leerzeile()
     cli_ui.trennlinie()
     cli_ui.info_zeile("Verbindung beendet")
     cli_ui.trennlinie()
@@ -269,16 +317,18 @@ async def server_starten(port: int, name: str) -> None:
         port: TCP-Port auf dem gelauscht wird
         name: Anzeigename für Nachrichten
     """
-    cli_ui.banner_anzeigen()
-    print()
     cli_ui.status_box("server", port, name)
-    print()
+    cli_ui.leerzeile()
 
     # Future wird pro Client-Zyklus neu gesetzt
     naechster: asyncio.Future = asyncio.get_running_loop().create_future()
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         nonlocal naechster
+        # TCP Keep-Alive auf akzeptiertem Socket setzen
+        sock = writer.get_extra_info("socket")
+        if sock:
+            _keepalive_setzen(sock)
         if not naechster.done():
             naechster.set_result((reader, writer))
         else:
@@ -300,11 +350,18 @@ async def server_starten(port: int, name: str) -> None:
 
     logger.info("Warte auf Verbindungen auf Port %d ...", port)
 
+    # Peer-Identität und Outbox-Zustand sitzungsübergreifend tracken
+    _letzter_peer_cn: str = ""
+    _outbox: collections.deque[tuple[int, str]] = collections.deque()
+    _naechste_seq: int = 0
+    _resume_token: str = ""
+    _zuletzt_empfangene_seq: int = -1
+
     async with server:
         while True:
             cli_ui.info_zeile(f"Warte auf Client-Verbindung auf Port {port} ...")
             cli_ui.info_zeile("Ctrl+C zum Beenden des Servers")
-            print()
+            cli_ui.leerzeile()
 
             reader, writer = await naechster
             naechster = asyncio.get_running_loop().create_future()  # für nächsten Client
@@ -312,7 +369,27 @@ async def server_starten(port: int, name: str) -> None:
             adresse = writer.get_extra_info("peername")
             logger.info("TCP/TLS-Verbindung von %s akzeptiert", adresse[0])
 
+            # Peer-Identität aus mTLS-Zertifikat ermitteln
+            ssl_obj = writer.get_extra_info("ssl_object")
+            peer_cn = _peer_cn_aus_zertifikat(ssl_obj)
+            ist_wiederverbindung = bool(peer_cn and peer_cn == _letzter_peer_cn)
+            if peer_cn:
+                _letzter_peer_cn = peer_cn
+
+            if ist_wiederverbindung:
+                cli_ui.info_zeile(f"Bekannter Peer wiederverbunden: {peer_cn} ({adresse[0]})")
+            elif peer_cn:
+                cli_ui.info_zeile(f"Neuer Client verbunden: {peer_cn} ({adresse[0]})")
+                # Neuer Peer → Outbox-Zustand zurücksetzen
+                _outbox = collections.deque()
+                _naechste_seq = 0
+                _resume_token = ""
+                _zuletzt_empfangene_seq = -1
+
             sitzung = Sitzung(reader, writer, absender_name=name, server_modus=True)
+            sitzung.sitzungs_zustand_uebernehmen(
+                _outbox, _naechste_seq, _resume_token, _zuletzt_empfangene_seq
+            )
 
             cli_ui.info_zeile(f"Client verbunden: {adresse[0]} – führe App-Handshake durch ...")
             try:
@@ -322,15 +399,26 @@ async def server_starten(port: int, name: str) -> None:
                 cli_ui.info_zeile(f"Handshake fehlgeschlagen: {fehler}")
                 continue
 
+            # Ausstehende Nachrichten bei Wiederverbindung erneut senden
+            if ist_wiederverbindung and _outbox:
+                cli_ui.info_zeile(f"Sende {len(_outbox)} ausstehende Nachricht(en) nach Reconnect ...")
+                await sitzung.outbox_wiederholen()
+
             cli_ui.info_zeile(f"Sitzung bereit mit {adresse[0]}")
             cli_ui.trennlinie()
-            print("  Nachrichten eingeben · 'quit' zum Beenden")
+            cli_ui.chat_hinweis()
             cli_ui.trennlinie()
-            print()
+            cli_ui.leerzeile()
 
             quit_durch_nutzer = await _chat_sitzung_fuehren(sitzung, "Client")
 
-            print()
+            # Outbox-Zustand für nächste Verbindung sichern
+            _outbox = sitzung._outbox
+            _naechste_seq = sitzung._naechste_seq
+            _resume_token = sitzung._resume_token
+            _zuletzt_empfangene_seq = sitzung._zuletzt_empfangene_seq
+
+            cli_ui.leerzeile()
             cli_ui.trennlinie()
             if quit_durch_nutzer:
                 cli_ui.info_zeile("Verbindung beendet · Server wird beendet")
@@ -339,7 +427,7 @@ async def server_starten(port: int, name: str) -> None:
 
             cli_ui.info_zeile("Verbindung beendet · Warte auf nächsten Client")
             cli_ui.trennlinie()
-            print()
+            cli_ui.leerzeile()
 
     logger.info("Server-Sitzung beendet")
 
@@ -361,12 +449,15 @@ async def client_starten(ziel: str, port: int, name: str) -> None:
         port: TCP-Port des Servers
         name: Anzeigename für Nachricht-Payloads
     """
-    cli_ui.banner_anzeigen()
-    print()
     cli_ui.status_box("client", port, name)
-    print()
+    cli_ui.leerzeile()
 
     versuch = 0
+    # Outbox-Zustand über Reconnects hinweg beibehalten
+    _outbox: collections.deque[tuple[int, str]] = collections.deque()
+    _naechste_seq: int = 0
+    _resume_token: str = ""
+    _zuletzt_empfangene_seq: int = -1
 
     while True:
         # Backoff vor Reconnect-Versuchen
@@ -393,6 +484,9 @@ async def client_starten(ziel: str, port: int, name: str) -> None:
         versuch = 0  # Reset nach erfolgreicher Verbindung
 
         sitzung = Sitzung(reader, writer, absender_name=name, server_modus=False)
+        sitzung.sitzungs_zustand_uebernehmen(
+            _outbox, _naechste_seq, _resume_token, _zuletzt_empfangene_seq
+        )
 
         cli_ui.info_zeile(f"TLS verbunden mit {ziel}:{port} – führe App-Handshake durch ...")
         try:
@@ -403,20 +497,31 @@ async def client_starten(ziel: str, port: int, name: str) -> None:
             versuch += 1
             continue
 
+        # Ausstehende Nachrichten nach Reconnect erneut senden
+        if _outbox:
+            cli_ui.info_zeile(f"Sende {len(_outbox)} ausstehende Nachricht(en) nach Reconnect ...")
+            await sitzung.outbox_wiederholen()
+
         cli_ui.info_zeile(f"Sitzung bereit mit {ziel}:{port}")
         cli_ui.trennlinie()
-        print("  Nachrichten eingeben · 'quit' zum Beenden")
+        cli_ui.chat_hinweis()
         cli_ui.trennlinie()
-        print()
+        cli_ui.leerzeile()
 
         quit_durch_nutzer = await _chat_sitzung_fuehren(sitzung, "Server")
+
+        # Outbox-Zustand für nächsten Reconnect sichern
+        _outbox = sitzung._outbox
+        _naechste_seq = sitzung._naechste_seq
+        _resume_token = sitzung._resume_token
+        _zuletzt_empfangene_seq = sitzung._zuletzt_empfangene_seq
 
         if quit_durch_nutzer:
             break
 
         versuch += 1  # Unerwartetes Ende → Reconnect vorbereiten
 
-    print()
+    cli_ui.leerzeile()
     cli_ui.trennlinie()
     cli_ui.info_zeile("Verbindung beendet")
     cli_ui.trennlinie()
