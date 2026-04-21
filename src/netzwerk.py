@@ -335,11 +335,16 @@ async def frame_senden(writer: asyncio.StreamWriter, frame: dict) -> None:
         frame:  Protokoll-Frame als dict.
 
     Wirft:
+        FrameZuGross: Wenn der serialisierte Frame konfig.MAX_FRAME_BYTES überschreitet.
         OSError:      Bei Netzwerkfehlern.
         ssl.SSLError: Bei TLS-Fehlern.
     """
     linie = json.dumps(frame, ensure_ascii=False) + "\n"
     rohdaten = linie.encode("utf-8")
+    if len(rohdaten) > konfig.MAX_FRAME_BYTES:
+        raise FrameZuGross(
+            f"Frame zu groß: {len(rohdaten)} Bytes (Limit: {konfig.MAX_FRAME_BYTES})"
+        )
     try:
         writer.write(rohdaten)
         await writer.drain()

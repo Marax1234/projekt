@@ -615,6 +615,9 @@ class Sitzung:
 
         try:
             await self._senden(frame)
+        except FrameZuGross:
+            self._pending_acks.pop(msg_id, None)
+            raise
         except (OSError, ssl.SSLError) as fehler:
             logger.error("CHAT senden fehlgeschlagen: %s", fehler)
             self._pending_acks.pop(msg_id, None)
