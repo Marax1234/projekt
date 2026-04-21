@@ -18,7 +18,7 @@ sequenceDiagram
     participant B as Client B
 
     rect rgb(220, 235, 255)
-        Note over A,B: Phase 1 – TCP-Verbindungsaufbau (Race to Connect, Port 6769)
+        Note over A,B: Phase 1 – TCP-Verbindungsaufbau (Race to Connect, Port 49200)
         A->>B: TCP SYN
         B-->>A: TCP SYN-ACK
         A->>B: TCP ACK

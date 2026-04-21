@@ -79,7 +79,7 @@ def banner_anzeigen() -> None:
     breite = _term_breite()
     try:
         ergebnis = subprocess.run(
-            ["figlet", "-w", str(breite), "-f", "standard", "P2P Chat"],
+            ["figlet", "-w", str(breite), "-f", "standard", "LastRowChat"],
             capture_output=True,
             text=True,
             timeout=3,
@@ -105,7 +105,7 @@ def banner_anzeigen() -> None:
         print(_DV + zeile.center(box_w) + _DV)
     print(_DBL + _DH * box_w + _DBR)
 
-    untertitel = "NetSec 2026 · Gruppe 2 · P2P-Chat v1.0"
+    untertitel = "NetSec 2026 · Gruppe 2 · LastRowChat v1.0"
     print(_DV + untertitel.center(box_w) + _DV)
     print(_DBL + _DH * box_w + _DBR)
 
@@ -360,7 +360,7 @@ def status_box(modus: str, port: int, name: str) -> None:
 
     Beispiel (ohne TUI):
         ┌─ Status ──────────────────────────────────┐
-        │  Modus: SERVER  │  Port: 6769  │  Name: X  │
+        │  Modus: SERVER  │  Port: 49200  │  Name: X  │
         └────────────────────────────────────────────┘
     """
     if _tui is not None:

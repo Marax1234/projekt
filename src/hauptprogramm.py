@@ -13,18 +13,18 @@ Modul:        Network Security 2026
 
 Verwendung:
     Auto-Modus (Race to Connect) – beide Peers starten gleichzeitig:
-        VM1:  python3 src/hauptprogramm.py --ziel <IP_VM2> --port 6769
-        VM2:  python3 src/hauptprogramm.py --ziel <IP_VM1> --port 6769
+        VM1:  python3 src/hauptprogramm.py --ziel <IP_VM2> --port 49200
+        VM2:  python3 src/hauptprogramm.py --ziel <IP_VM1> --port 49200
         Die Server/Client-Rolle wird automatisch bestimmt.
 
     Manueller Modus (rückwärtskompatibel):
-        Server:  python3 src/hauptprogramm.py --modus server --port 6769
-        Client:  python3 src/hauptprogramm.py --modus client --ziel 192.168.56.101 --port 6769
+        Server:  python3 src/hauptprogramm.py --modus server --port 49200
+        Client:  python3 src/hauptprogramm.py --modus client --ziel 192.168.56.101 --port 49200
 
     Optionen:
         --ziel    IP-Adresse des anderen Peers (Race-to-Connect-Modus)
         --modus   server|client  (manueller Modus, rückwärtskompatibel)
-        --port    TCP-Port       (Standard: 6769)
+        --port    TCP-Port       (Standard: 49200)
         --name    Anzeigename    (Standard: "Peer", "Server" oder "Client")
         --debug   DEBUG-Logging  (Standard: WARNING)
 """
@@ -75,7 +75,7 @@ def _argumente_parsen() -> argparse.Namespace:
     """Parst die Kommandozeilenargumente und gibt ein Namespace-Objekt zurück."""
     parser = argparse.ArgumentParser(
         prog="hauptprogramm.py",
-        description="P2P-Chat-Protokoll – Network Security 2026",
+        description="LastRowChat-Protokoll – Network Security 2026",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Beispiele:\n"
@@ -170,7 +170,7 @@ def main() -> None:
     name = args.name or cli_ui.username_abfragen(standard_name)
 
     logger.info(
-        "Starte P2P-Chat (Modus: %s, Name: %s, Port: %d)",
+        "Starte LastRowChat (Modus: %s, Name: %s, Port: %d)",
         args.modus or "auto", name, args.port,
     )
 

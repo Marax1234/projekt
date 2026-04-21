@@ -1,4 +1,4 @@
-# Limitierungen des P2P-Chat-Protokolls
+# Limitierungen des LastRowChat-Protokolls
 
 Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protokollentwurfs (Version 1.0).
 

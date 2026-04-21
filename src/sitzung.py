@@ -84,7 +84,7 @@ def _neue_id(prefix: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 class Sitzung:
-    """P2P-Chat-Sitzung mit vollständigem Anwendungsprotokoll.
+    """LastRowChat-Sitzung mit vollständigem Anwendungsprotokoll.
 
     Attribute:
         reader:         asyncio.StreamReader der TLS-Verbindung
