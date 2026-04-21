@@ -17,7 +17,6 @@ PORT: int = 49200                     # Standard-TCP-Port für LastRowChat
 BIND_ADRESSE: str = "0.0.0.0"        # Lausch-Adresse für den Server
 VERBINDUNGS_TIMEOUT: float = 10.0    # Sekunden bis Verbindungsaufbau abbricht
 SENDE_TIMEOUT: float = 10.0          # Sekunden bis Sende-Timeout
-MAX_VERBINDUNGEN: int = 1            # Maximale gleichzeitige Verbindungen (P2P = 1)
 RACE_TIMEOUT: float = 15.0           # Gesamtwartezeit Race-to-Connect (Sekunden)
 RACE_CLIENT_VERZOEGERUNG: float = 0.3  # Verzögerung des Client-Tasks im Race (Sekunden)
 

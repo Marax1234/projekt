@@ -4,31 +4,23 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 
 ---
 
-## 1. Nur 1:1-Verbindung
+## 1. Nur 1:1-Verbindung / kein Gruppenchat
 
-**Beschreibung:** Das System unterstützt maximal eine gleichzeitige Verbindung.  
-**Ursache:** `konfig.py:21` – `MAX_VERBINDUNGEN = 1`; der Server-Socket lauscht mit Warteschlangenlänge 1.  
-**Auswirkung:** Kein Gruppenchat, kein Broadcast, keine parallelen Sitzungen möglich.
-
----
-
-## 2. Kein Gruppenchat / kein Broadcast
-
-**Beschreibung:** Die P2P-Architektur kennt keine zentrale Vermittlungsinstanz.  
-**Ursache:** `sitzung.py` verwaltet genau eine `ssl.SSLSocket`-Verbindung pro Sitzung; es gibt keinen Mechanismus, Nachrichten an mehrere Peers weiterzuleiten.  
-**Auswirkung:** Für Gruppenkommunikation müsste eine Mesh-Topologie oder ein dedizierter Relay-Server eingeführt werden.
+**Beschreibung:** Das System unterstützt ausschließlich eine gleichzeitige Verbindung zwischen genau zwei Peers. Gruppenchat und Broadcast sind nicht möglich.  
+**Ursache:** Die Begrenzung wird auf Anwendungsebene durchgesetzt: `server_starten()` schließt eingehende Verbindungen sofort (`writer.close()`), solange eine Sitzung aktiv ist; `auto_verbinden()` akzeptiert ausschließlich die erste eingehende Verbindung über ein geteiltes `asyncio.Future`. Darüber hinaus verwaltet `sitzung.py` genau ein Paar `asyncio.StreamReader / asyncio.StreamWriter`; es gibt keinen Mechanismus, Nachrichten an mehrere Peers weiterzuleiten.  
+**Auswirkung:** Kein Gruppenchat, kein Broadcast, keine parallelen Sitzungen. Für Gruppenkommunikation wäre eine Mesh-Topologie oder ein dedizierter Relay-Server erforderlich.
 
 ---
 
-## 3. Kein persistenter Nachrichtenspeicher
+## 2. Kein persistenter Nachrichtenspeicher
 
 **Beschreibung:** Der Chat-Verlauf wird ausschließlich im RAM gehalten.  
-**Ursache:** `sitzung.py` speichert keine gesendeten oder empfangenen Nachrichten; `cli_ui.py` gibt sie nur auf der Konsole aus.  
-**Auswirkung:** Nach Verbindungsabbau oder Programmende ist der gesamte Verlauf unwiderruflich verloren.
+**Ursache:** `sitzung.py` speichert empfangene Nachrichten nicht; `cli_ui.py` gibt sie nur auf der Konsole aus. Gesendete, noch nicht bestätigte Nachrichten werden temporär in einer `_outbox` (`collections.deque`) gehalten und nach einem Reconnect automatisch erneut gesendet (`outbox_wiederholen()`). Diese Outbox wird jedoch nicht auf Disk persistiert und geht beim Programmende verloren.  
+**Auswirkung:** Nach Verbindungsabbau oder Programmende ist der gesamte Chatverlauf unwiderruflich verloren. Unbestätigte Nachrichten werden bei Reconnect innerhalb derselben Programmsitzung nachgeliefert, nicht jedoch nach einem Neustart.
 
 ---
 
-## 4. Kein NAT-Traversal
+## 3. Kein NAT-Traversal
 
 **Beschreibung:** Beide Peers müssen direkt über IP erreichbar sein.  
 **Ursache:** `netzwerk.py` verwendet direkte TCP-Verbindungen; es existieren keine STUN-, TURN- oder Hole-Punching-Mechanismen.  
@@ -36,7 +28,7 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 
 ---
 
-## 5. Nur IPv4
+## 4. Nur IPv4
 
 **Beschreibung:** Das System unterstützt ausschließlich IPv4.  
 **Ursache:** `konfig.py:17` – `BIND_ADRESSE = "0.0.0.0"` bindet den Server-Socket nur an alle IPv4-Interfaces. `asyncio.start_server` und `asyncio.open_connection` verwenden damit ausschließlich IPv4.  
@@ -44,15 +36,24 @@ Dieses Dokument beschreibt alle bekannten Einschränkungen des aktuellen Protoko
 
 ---
 
-## 6. Wiederverbindung begrenzt auf MAX_RECONNECT_VERSUCHE
+## 5. Wiederverbindung begrenzt auf MAX_RECONNECT_VERSUCHE
 
 **Beschreibung:** Client- und Auto-Modus versuchen nach einem Abbruch automatisch
-Reconnect mit exponentiellem Backoff (bis 60 s). Nach `MAX_RECONNECT_VERSUCHE` (= 10)
+Reconnect mit exponentiellem Backoff (bis 10 s). Nach `MAX_RECONNECT_VERSUCHE` (= 10)
 erfolglosen Versuchen beendet sich das Programm.  
 **Ursache:** Unendliche Wiederholungen würden eine dauerhaft nicht erreichbare Gegenstelle
 nicht erkennen und CPU/Netz unnötig belasten.  
 **Auswirkung:** Bei mehr als 10 aufeinanderfolgenden Fehlversuchen ist ein manueller
 Neustart erforderlich. Der Server-Modus ist davon nicht betroffen (lauscht unbegrenzt).
+
+---
+
+## 6. `check_hostname` deaktiviert im TLS-Client
+
+**Beschreibung:** Der TLS-Client prüft nicht, ob der CN oder ein SAN des Peer-Zertifikats mit der Ziel-IP-Adresse übereinstimmt (`netzwerk.py` – `kontext.check_hostname = False`).  
+**Ursache:** Python verlangt für IP-basierte Verbindungen einen expliziten `IP:`-SAN-Eintrag im Zertifikat. Da die aktuellen Zertifikate (`zertifikate_erstellen.sh`) keinen SAN enthalten, würde `check_hostname = True` den Verbindungsaufbau sofort abbrechen.  
+**Ausnutzbarkeit:** Die Schwachstelle setzt voraus, dass ein Angreifer ein **gültiges CA-signiertes Zertifikat** vorlegen kann. Da der mTLS-Handshake `CERT_REQUIRED` erzwingt, schlägt jeder Verbindungsversuch ohne CA-signiertes Zertifikat bereits vor der Hostname-Prüfung fehl. Solange kein Angreifer Zugriff auf den CA-Schlüssel hat, ist die Limitierung **nicht ausnutzbar**. Im isolierten VirtualBox Internal Network, wo der CA-Schlüssel lokal auf den VMs verbleibt, ist diese Bedingung erfüllt.  
+**Restrisiko:** Wird der CA-Schlüssel kompromittiert (z. B. durch unsichere HTTP-Übertragung, siehe Punkt 8), kann ein Angreifer ein eigenes CA-signiertes Zertifikat ausstellen und die fehlende Hostname-Prüfung ausnutzen, um einen MITM-Angriff durchzuführen.  
 
 ---
 
