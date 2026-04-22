@@ -61,7 +61,7 @@ if $NUR_PEER_CERT; then
     openssl req -new \
         -key "$PEER_KEY" \
         -out "$PEER_CSR" \
-        -subj "/CN=P2PChat-Peer/O=DHBW-NetSec-2026/OU=Gruppe2" \
+        -subj "/CN=LastRowChat-Peer/O=DHBW-NetSec-2026/OU=Gruppe2" \
         2>/dev/null
 
     echo "[2/2] Signiere Peer-Zertifikat mit vorhandener CA (1 Jahr) ..."
@@ -93,7 +93,7 @@ echo "[2/4] Erzeuge selbstsigniertes CA-Zertifikat (10 Jahre) ..."
 openssl req -new -x509 -days 3650 \
     -key "$CA_KEY" \
     -out "$CA_CERT" \
-    -subj "/CN=P2PChat-CA/O=DHBW-NetSec-2026/OU=Gruppe2" \
+    -subj "/CN=LastRowChat-CA/O=DHBW-NetSec-2026/OU=Gruppe2" \
     2>/dev/null
 
 echo "[3/4] Erzeuge Peer-Schlüssel und Certificate Signing Request ..."
@@ -101,7 +101,7 @@ openssl genrsa -out "$PEER_KEY" 2048 2>/dev/null
 openssl req -new \
     -key "$PEER_KEY" \
     -out "$PEER_CSR" \
-    -subj "/CN=P2PChat-Peer/O=DHBW-NetSec-2026/OU=Gruppe2" \
+    -subj "/CN=LastRowChat-Peer/O=DHBW-NetSec-2026/OU=Gruppe2" \
     2>/dev/null
 
 echo "[4/4] Signiere Peer-Zertifikat mit CA (1 Jahr) ..."

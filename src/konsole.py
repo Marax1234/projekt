@@ -24,7 +24,7 @@ import threading
 
 import cli_ui
 import konfig
-from netzwerk import auto_verbinden, tls_kontext_server, verbindung_herstellen, _keepalive_setzen
+from netzwerk import FrameZuGross, auto_verbinden, tls_kontext_server, verbindung_herstellen, _keepalive_setzen
 from sitzung import Sitzung
 
 logger = logging.getLogger(__name__)
@@ -175,7 +175,14 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
             if eingabe.lower() in ("quit", "exit", "q"):
                 quit_durch_nutzer = True
                 break
-            if not await sitzung.chat_senden(eingabe):
+            try:
+                gesendet = await sitzung.chat_senden(eingabe)
+            except FrameZuGross:
+                cli_ui.info_zeile(
+                    f"Nachricht zu lang – maximal {konfig.MAX_FRAME_BYTES} Bytes erlaubt"
+                )
+                continue
+            if not gesendet:
                 cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
                 break
             cli_ui.eigene_nachricht_ausgeben(sitzung.absender_name, eingabe)

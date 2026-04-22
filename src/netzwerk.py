@@ -31,7 +31,7 @@ Testschritte – Race-to-Connect (2 Terminals, gleichzeitig starten):
         "
 
     Wireshark-Validierung:
-        tshark -i eth0 -f "tcp port 6769" -Y "tls.handshake" -c 10
+        tshark -i eth0 -f "tcp port 49200" -Y "tls.handshake" -c 10
         # Erwartung: TLS 1.3-Handshake sichtbar (Record Version 0x0304), Payload verschlüsselt
 """
 
@@ -146,7 +146,7 @@ async def verbindung_herstellen(
 
     Parameter:
         server_ip: IP-Adresse oder Hostname des Ziel-Servers.
-        port:      Ziel-Port (Standard: konfig.PORT = 6769).
+        port:      Ziel-Port (Standard: konfig.PORT = 49200).
 
     Rückgabe:
         (reader, writer) – fertig verbundene TLS-Streams.
@@ -206,7 +206,7 @@ async def auto_verbinden(
 
     Parameter:
         ziel_ip: IP-Adresse des anderen Peers.
-        port:    TCP-Port (Standard: konfig.PORT = 6769).
+        port:    TCP-Port (Standard: konfig.PORT = 49200).
 
     Rückgabe:
         (reader, writer, ist_server):
@@ -335,11 +335,16 @@ async def frame_senden(writer: asyncio.StreamWriter, frame: dict) -> None:
         frame:  Protokoll-Frame als dict.
 
     Wirft:
+        FrameZuGross: Wenn der serialisierte Frame konfig.MAX_FRAME_BYTES überschreitet.
         OSError:      Bei Netzwerkfehlern.
         ssl.SSLError: Bei TLS-Fehlern.
     """
     linie = json.dumps(frame, ensure_ascii=False) + "\n"
     rohdaten = linie.encode("utf-8")
+    if len(rohdaten) > konfig.MAX_FRAME_BYTES:
+        raise FrameZuGross(
+            f"Frame zu groß: {len(rohdaten)} Bytes (Limit: {konfig.MAX_FRAME_BYTES})"
+        )
     try:
         writer.write(rohdaten)
         await writer.drain()

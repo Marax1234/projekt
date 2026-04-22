@@ -1,7 +1,7 @@
 """
 konfig.py – Konfigurationskonstanten
 
-Beschreibung: Zentrale Konfigurationsdatei für alle Konstanten des P2P-Chat-Protokolls.
+Beschreibung: Zentrale Konfigurationsdatei für alle Konstanten des LastRowChat-Protokolls.
               Alle Module importieren Werte ausschliesslich von hier.
 Autor:        Gruppe 2
 Datum:        2026-03-24
@@ -13,11 +13,10 @@ import pathlib
 # ---------------------------------------------------------------------------
 # Netzwerk
 # ---------------------------------------------------------------------------
-PORT: int = 6769                      # Standard-TCP-Port für P2P-Chat
+PORT: int = 49200                     # Standard-TCP-Port für LastRowChat
 BIND_ADRESSE: str = "0.0.0.0"        # Lausch-Adresse für den Server
 VERBINDUNGS_TIMEOUT: float = 10.0    # Sekunden bis Verbindungsaufbau abbricht
 SENDE_TIMEOUT: float = 10.0          # Sekunden bis Sende-Timeout
-MAX_VERBINDUNGEN: int = 1            # Maximale gleichzeitige Verbindungen (P2P = 1)
 RACE_TIMEOUT: float = 15.0           # Gesamtwartezeit Race-to-Connect (Sekunden)
 RACE_CLIENT_VERZOEGERUNG: float = 0.3  # Verzögerung des Client-Tasks im Race (Sekunden)
 
@@ -34,7 +33,7 @@ CA_ZERTIFIKAT_PFAD: pathlib.Path = _PROJEKT_WURZEL / "certs" / "ca_zertifikat.pe
 # ---------------------------------------------------------------------------
 LOG_LEVEL: str = "WARNING"              # Standard-Log-Level (DEBUG, INFO, WARNING, ERROR)
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-LOG_DATEINAME: str = "p2pchat.log"   # Log-Datei im Projektverzeichnis
+LOG_DATEINAME: str = "lastrowchat.log"  # Log-Datei im Projektverzeichnis
 
 # ---------------------------------------------------------------------------
 # Anwendungsprotokoll

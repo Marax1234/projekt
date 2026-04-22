@@ -84,7 +84,7 @@ def _neue_id(prefix: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 class Sitzung:
-    """P2P-Chat-Sitzung mit vollständigem Anwendungsprotokoll.
+    """LastRowChat-Sitzung mit vollständigem Anwendungsprotokoll.
 
     Attribute:
         reader:         asyncio.StreamReader der TLS-Verbindung
@@ -615,6 +615,9 @@ class Sitzung:
 
         try:
             await self._senden(frame)
+        except FrameZuGross:
+            self._pending_acks.pop(msg_id, None)
+            raise
         except (OSError, ssl.SSLError) as fehler:
             logger.error("CHAT senden fehlgeschlagen: %s", fehler)
             self._pending_acks.pop(msg_id, None)

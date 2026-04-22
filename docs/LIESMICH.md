@@ -1,7 +1,7 @@
-# P2P Chat – Startanleitung
+# LastRowChat – Startanleitung
 
 **Kurs:** Network Security 2026 | **Gruppe 2**
-**Protokoll:** P2PChat v1.0 | **Port:** 6769 | **TLS 1.3 + mTLS**
+**Protokoll:** LastRowChat v1.0 | **Port:** 49200 | **TLS 1.3 + mTLS**
 
 ---
 
@@ -73,12 +73,12 @@ openssl verify -CAfile certs/ca_zertifikat.pem certs/zertifikat.pem
 
 **VM1 (z. B. IP 192.168.100.1):**
 ```bash
-python3 src/hauptprogramm.py --ziel 192.168.100.2 --port 6769
+python3 src/hauptprogramm.py --ziel 192.168.100.2 --port 49200
 ```
 
 **VM2 (z. B. IP 192.168.100.2):**
 ```bash
-python3 src/hauptprogramm.py --ziel 192.168.100.1 --port 6769
+python3 src/hauptprogramm.py --ziel 192.168.100.1 --port 49200
 ```
 
 Beide Peers starten gleichzeitig. Die Rolle (Server/Client) wird
@@ -88,12 +88,12 @@ automatisch bestimmt und ausgegeben.
 
 **VM1 – Server:**
 ```bash
-python3 src/hauptprogramm.py --modus server --port 6769
+python3 src/hauptprogramm.py --modus server --port 49200
 ```
 
 **VM2 – Client:**
 ```bash
-python3 src/hauptprogramm.py --modus client --ziel <IP_VON_VM1> --port 6769
+python3 src/hauptprogramm.py --modus client --ziel <IP_VON_VM1> --port 49200
 ```
 
 **Optionale Parameter:**
@@ -111,7 +111,7 @@ python3 src/hauptprogramm.py --modus client --ziel <IP_VON_VM1> --port 6769
 ping <IP_VON_VM1>
 
 # Port offen?
-nc -zv <IP_VON_VM1> 6769
+nc -zv <IP_VON_VM1> 49200
 
 # Netzwerkinterfaces prüfen
 ip addr show
@@ -123,13 +123,13 @@ ip addr show
 
 ```bash
 # Auf VM1 oder VM2 parallel zum Chat starten:
-tshark -i eth0 -f "tcp port 6769"
+tshark -i eth0 -f "tcp port 49200"
 
 # Nur TLS-Handshake-Pakete anzeigen:
-tshark -i eth0 -f "tcp port 6769" -Y "tls.handshake"
+tshark -i eth0 -f "tcp port 49200" -Y "tls.handshake"
 
 # Aufzeichnung in Datei speichern:
-tshark -i eth0 -f "tcp port 6769" -w capture.pcapng
+tshark -i eth0 -f "tcp port 49200" -w capture.pcapng
 
 # In Wireshark: Analyze → Expert Information zeigt TLS Cipher Suite
 # Erwartung: TLS 1.3-Handshake sichtbar (Record Version: TLS 1.3), Payload verschlüsselt
@@ -139,11 +139,11 @@ tshark -i eth0 -f "tcp port 6769" -w capture.pcapng
 
 ## Log-Datei
 
-Die Anwendung schreibt alle Ereignisse in `p2pchat.log` (im Projektverzeichnis):
+Die Anwendung schreibt alle Ereignisse in `lastrowchat.log` (im Projektverzeichnis):
 
 ```bash
 # Log in Echtzeit verfolgen:
-tail -f p2pchat.log
+tail -f lastrowchat.log
 
 # Log-Level erhöhen (DEBUG zeigt Nachrichtendetails):
 python3 src/hauptprogramm.py --ziel <IP> --debug
@@ -272,7 +272,7 @@ Der Server-Modus verwendet bereits eine Endlosschleife und benötigt kein Reconn
 
 | Problem | Lösung |
 |---|---|
-| `Port already in use` | `sudo lsof -i :6769` – alten Prozess beenden |
+| `Port already in use` | `sudo lsof -i :49200` – alten Prozess beenden |
 | `SSL: CERTIFICATE_VERIFY_FAILED` | `certs/ca_zertifikat.pem` fehlt oder Peer-Zertifikat nicht von dieser CA signiert |
 | `SSL: NO_CERTIFICATE_RETURNED` | Gegenseite hat kein Zertifikat gesendet – `bash certs/zertifikate_erstellen.sh` auf beiden VMs ausführen |
 | Keine Verbindung nach 15 s | IP falsch, Port blockiert oder beide im Client-Try |
