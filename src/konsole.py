@@ -62,15 +62,13 @@ def _peer_cn_aus_zertifikat(ssl_objekt) -> str:
 # Backoff-Berechnung für Reconnect
 # ---------------------------------------------------------------------------
 
-def _backoff_sekunden(versuch: int, basis: float = 2.0, maximum: float = 10.0) -> float:
+def _backoff_sekunden(versuch: int, basis: float = 2.0, maximum: float = 60.0) -> float:
     """Berechnet Wartezeit für exponentielles Backoff mit Jitter.
 
     Parameter:
         versuch: Anzahl bisheriger Fehlversuche (> 0).
         basis:   Basis des Exponenten (Standard: 2.0).
-        maximum: Maximale Wartezeit in Sekunden (Standard: 10.0).
-                 Begrenzt auf 10 s, damit Reconnects nicht zu lange auf sich
-                 warten lassen (2^4 = 16 s würde sonst schon überschritten).
+        maximum: Maximale Wartezeit in Sekunden (Standard: 60.0).
 
     Rückgabe:
         Wartezeit in Sekunden (capped bei maximum).
@@ -161,23 +159,13 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
 
     empfang_task = asyncio.create_task(_empfang_mit_signal())
 
-    # chat_senden auf ein ACK wartet, damit die TUI nicht einfriert.
-    eingabe_task: asyncio.Task | None = None
-
     try:
         while sitzung.ist_aktiv and not trenn_ereignis.is_set():
-            if eingabe_task is None:
-                eingabe_task = asyncio.ensure_future(
-                    asyncio.to_thread(cli_ui.eingabe_prompt, trenn_ereignis)
-                )
             try:
-                eingabe = await eingabe_task
+                eingabe = await asyncio.to_thread(cli_ui.eingabe_prompt, trenn_ereignis)
             except (EOFError, KeyboardInterrupt):
                 logger.info("Eingabe unterbrochen – trenne Verbindung")
-                eingabe_task = None
                 break
-            eingabe_task = None
-
             if eingabe is None:
                 break  # Verbindung von Gegenseite getrennt
             if not eingabe:
@@ -185,14 +173,6 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
             if eingabe.lower() in ("quit", "exit", "q"):
                 quit_durch_nutzer = True
                 break
-
-            # Nächsten Eingabe-Task sofort starten, bevor chat_senden blockiert
-            eingabe_task = asyncio.ensure_future(
-                asyncio.to_thread(cli_ui.eingabe_prompt, trenn_ereignis)
-            )
-
-            cli_ui.eigene_nachricht_ausgeben(sitzung.absender_name, eingabe)
-
             try:
                 gesendet = await sitzung.chat_senden(eingabe)
             except FrameZuGross:
@@ -203,14 +183,9 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
             if not gesendet:
                 cli_ui.info_zeile("Nachricht nicht übertragen – Verbindung getrennt")
                 break
+            cli_ui.eigene_nachricht_ausgeben(sitzung.absender_name, eingabe)
     finally:
         trenn_ereignis.set()
-        if eingabe_task is not None:
-            eingabe_task.cancel()
-            try:
-                await eingabe_task
-            except (asyncio.CancelledError, EOFError, KeyboardInterrupt):
-                pass
         empfang_task.cancel()
         try:
             await empfang_task
