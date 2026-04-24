@@ -119,23 +119,6 @@ ip addr show
 
 ---
 
-## TLS-Handshake mit Wireshark/tshark beobachten
-
-```bash
-# Auf VM1 oder VM2 parallel zum Chat starten:
-tshark -i eth0 -f "tcp port 49200"
-
-# Nur TLS-Handshake-Pakete anzeigen:
-tshark -i eth0 -f "tcp port 49200" -Y "tls.handshake"
-
-# Aufzeichnung in Datei speichern:
-tshark -i eth0 -f "tcp port 49200" -w capture.pcapng
-
-# In Wireshark: Analyze → Expert Information zeigt TLS Cipher Suite
-# Erwartung: TLS 1.3-Handshake sichtbar (Record Version: TLS 1.3), Payload verschlüsselt
-```
-
----
 
 ## Log-Datei
 

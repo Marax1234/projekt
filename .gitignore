@@ -13,7 +13,7 @@ certs/*.pem
 .venv/
 venv/
 env/
-doku/
+
 
 # IDE
 .idea/

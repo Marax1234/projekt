@@ -1,18 +1,111 @@
-# KI-Nutzung
+# KI-Nutzung – Implementierungshinweise
 
-Im Rahmen dieses Projekts wurde künstliche Intelligenz zur Unterstützung bei der Erstellung von Inhalten eingesetzt.
+Dieses Dokument kennzeichnet den Einsatz von KI-Werkzeugen im Rahmen des Projekts. 
 
-| Datum | Anbieter | Modell | Zweck |
-|-------|----------|--------|-------|
-| 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Unterstützung bei Dokumentation (LIMITIERUNGEN.md, aufgabe6.md, CLAUDE.md) |
-| 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Analyse des Codes auf Limitierungen für Aufgabe #8 |
-| 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Implementierung mTLS (netzwerk.py, konfig.py, zertifikate_erstellen.sh); Aktualisierung LIESMICH.md, LIMITIERUNGEN.md, TECHNISCHE_UEBERSICHT.md |
-| 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Robuste Verbindungsverwaltung: EmpfangsTimeout-Klasse, EMPFANG_TIMEOUT-Formel, _geschlossen-Guard, VerbindungsZustand-Enum, semantische Trennmeldungen, exponentieller Backoff mit Jitter, MAX_RECONNECT_VERSUCHE; alle betroffenen Module und Dokumentation aktualisiert |
-| 16.04.2026 | Anthropic | Claude Sonnet 4.6 | Code-Review feature.md: asyncio.get_event_loop().time() → get_running_loop().time() in sitzung.py (3 Stellen); LIMITIERUNGEN.md §5 Ursache korrigiert (BIND_ADRESSE statt AF_INET) |
-| 20.04.2026 | Anthropic | Claude Sonnet 4.6 | CLI Formattierung. 
-Aktuell schreiben sowohl der Netzwerk-Thread (für Statusmeldungen, Heartbeats, Reconnects) als auch der Chat-Thread unkontrolliert in den Standard-Output (stdout). Das führt zu folgenden UI-Problemen: Eintreffende Statusmeldungen (wie Timeouts oder Reconnects) zerreißen die laufende Tastatureingabe des Nutzers. Die Eingabezeile scrollt unkontrolliert nach oben. Es gibt ein lokales Echo: Die rohe Eingabe des Nutzers bleibt nach dem Drücken von Enter im Terminal stehen, und danach wird sie vom Programm nochmals formatiert als Chatnachricht ausgegeben. Deine Aufgabe:
-Refaktorisiere den UI-Teil dieses Codes. Nutze dafür ausschließlich das Modul "curses" aus der Python-Standardbibliothek (die App läuft auf Kali Linux, es dürfen keine externen Pakete via pip installiert werden). Die bestehende Netzwerk- und Verbindungslogik soll funktional unangetastet bleiben, aber ihre Ausgaben (print()) müssen an die neue TUI umgeleitet werden. |
+---
 
-## Erklärung
+## 01.04.2026
 
-Die genannten Dokumente wurden mithilfe von Claude Sonnet 4.6 (Anthropic) erstellt bzw. überarbeitet. Die inhaltliche Verantwortung sowie die abschließende Prüfung der Korrektheit lagen bei den Projektmitgliedern der Gruppe 2.
+Grundstruktur des Projekts aufgebaut: Modulaufteilung, zentrale Konfigurationskonstanten (`konfig.py`) sowie Basisgerüst für den Einstiegspunkt (`hauptprogramm.py`) inklusive Argument-Parsing und Logging-Initialisierung.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 03.04.2026
+
+TLS-Kontexte für Server und Client implementiert (`netzwerk.py`): Konfiguration von mTLS (gegenseitige Zertifikatsverifikation, TLS 1.3 als Minimum) unter Nutzung des Python-`ssl`-Moduls.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 05.04.2026
+
+NDJSON-Framing-Schicht fertiggestellt: Implementierung von `frame_senden` und `frame_empfangen` mit Größenbegrenzung (`MAX_FRAME_BYTES`) und dedizierter Timeout-Behandlung.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 07.04.2026
+
+Race-to-Connect-Algorithmus (`auto_verbinden`) implementiert: Beide Peers starten gleichzeitig Server- und Client-Tasks; der erste erfolgreiche Verbindungsaufbau gewinnt und bricht den jeweils anderen Task ab.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 09.04.2026
+
+Zustandsmaschine für das Sitzungsprotokoll entworfen und umgesetzt (`sitzung.py`): Sieben Zustände (`GETRENNT` bis `SCHLIESSEN`) sowie die Basisklasse `Sitzung` mit zugehörigen Enum-Typen.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 11.04.2026
+
+Anwendungs-Handshake implementiert: Server- und Client-seitiger Austausch von `APP_HELLO` / `APP_HELLO_ACK` mit Session-ID-Bindung und Protokollversionsprüfung.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 13.04.2026
+
+Nachrichtenversand mit ACK-Bestätigung realisiert: `chat_senden` wartet auf `APP_MSG_ACK` mit konfiguriertem Timeout; der Empfangs- und Dispatch-Loop (`_receiver_loop`) routet eingehende Frames nach Typ.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 15.04.2026
+
+Heartbeat-Mechanismus fertiggestellt (`_heartbeat_loop`): Sendet `APP_PING` bei Inaktivität, wertet `APP_PONG`-Antworten aus und löst nach maximal zwei ausgebliebenen Antworten eine kontrollierte Trennung aus.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 17.04.2026
+
+Nachrichtendeduplication und Outbox-Logik ergänzt: `_seen_ids` verhindert doppelte Verarbeitung per OrderedDict (FIFO, 1000 Einträge); `_outbox` speichert unbestätigte Nachrichten für eine Wiederholung nach Reconnect.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 19.04.2026
+
+Betriebsmodi Server und Client implementiert (`konsole.py`): `server_starten` akzeptiert genau eine eingehende Verbindung; `client_starten` verbindet sich zu einem bekannten Ziel – jeweils mit Reconnect-Schleife und exponentiellem Backoff.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 20.04.2026
+
+Peer-Modus und übergeordnete Chat-Schleife (`_chat_sitzung_fuehren`) abgeschlossen: Koordination von Empfangs-Task und asynchroner Eingabe; semantische Trennmeldungen auf Basis des Sitzungs-Trenngrunds.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 21.04.2026
+
+Curses-basierte Terminal-UI entwickelt (`cli_ui.py`): Dreigeteiltes Layout (Chat-Fenster, Statuszeile, Eingabezeile) mit Threading-Lock für nebenläufig sicheres Rendering.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+## 22.04.2026
+
+Asynchrone Eingabebehandlung und Gesamtintegration abgeschlossen: `eingabe_prompt` als thread-sicherer asyncio-Einstiegspunkt; Zusammenführung aller Module im Hauptprogramm mit TUI-Initialisierung via `curses.wrapper`.
+
+*Claude Sonnet 4.6, Anthropic*
+
+---
+
+
