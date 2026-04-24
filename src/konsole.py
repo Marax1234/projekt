@@ -161,7 +161,6 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
 
     empfang_task = asyncio.create_task(_empfang_mit_signal())
 
-    # Fix Bug 2: Eingabe-Task läuft permanent im Hintergrund, auch während
     # chat_senden auf ein ACK wartet, damit die TUI nicht einfriert.
     eingabe_task: asyncio.Task | None = None
 
@@ -188,12 +187,10 @@ async def _chat_sitzung_fuehren(sitzung: Sitzung, herkunft: str) -> bool:
                 break
 
             # Nächsten Eingabe-Task sofort starten, bevor chat_senden blockiert
-            # (Fix Bug 2: Tippen während ACK-Wartezeit wird jetzt angezeigt)
             eingabe_task = asyncio.ensure_future(
                 asyncio.to_thread(cli_ui.eingabe_prompt, trenn_ereignis)
             )
 
-            # Fix Bug 1: eigene Nachricht sofort anzeigen, unabhängig vom ACK
             cli_ui.eigene_nachricht_ausgeben(sitzung.absender_name, eingabe)
 
             try:
